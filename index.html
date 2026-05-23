@@ -26,64 +26,82 @@ a{text-decoration:none}
 @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .spin{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+.modal{background:#FDFAF4;border-radius:20px;padding:24px;width:100%;max-width:340px}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useRef,useCallback} = React;
+const {useState,useEffect,useRef} = React;
 
-// ── Supabase ──────────────────────────────────────────────────────────────
 const SB_URL = "https://bmgngnfcbczczhggzial.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtZ25nbmZjYmN6Y3poZ2d6aWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1MDg5MTUsImV4cCI6MjA5NTA4NDkxNX0.Y1_mpBuUD0bjBSGcI4Yget2N-YYEwbSF-1UoYU867uQ";
 const sb = supabase.createClient(SB_URL, SB_KEY);
 
 async function dbGet(id){
-  const {data,error} = await sb.from("opportunities").select("data").eq("id",id).single();
+  const {data,error}=await sb.from("opportunities").select("data").eq("id",id).single();
   if(error||!data) return null;
   return data.data;
 }
 async function dbCreate(opp){
-  const {data,error} = await sb.from("opportunities").insert({id:opp.id, data:opp}).select().single();
+  const {error}=await sb.from("opportunities").insert({id:opp.id,data:opp});
   if(error) throw error;
-  return data;
 }
 async function dbUpdate(opp){
-  const {error} = await sb.from("opportunities").update({data:opp}).eq("id",opp.id);
+  const {error}=await sb.from("opportunities").update({data:opp}).eq("id",opp.id);
   if(error) throw error;
 }
-async function dbList(){
-  const ids = LS.get(KEYS.MY_IDS)||[];
-  if(!ids.length) return [];
-  const {data,error} = await sb.from("opportunities").select("data").in("id",ids);
+async function dbList(ids){
+  if(!ids||!ids.length) return [];
+  const {data,error}=await sb.from("opportunities").select("data").in("id",ids);
   if(error||!data) return [];
   return data.map(r=>r.data);
 }
 
-// ── localStorage ──────────────────────────────────────────────────────────
 const LS={
   get(k){try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},
   set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
 };
-const KEYS={RESTS:"s_rests",NAMES:"s_names",ITEMS:"s_items",MY_IDS:"s_my_ids"};
+const KEYS={RESTS:"s_rests",NAMES:"s_names",REST_ITEMS:"s_rest_items",MY_IDS:"s_my_ids",MY_OPPS_PIN:"s_opps_pin"};
 
-// ── Helpers ───────────────────────────────────────────────────────────────
 const uid=()=>Math.random().toString(36).slice(2,10);
 const fmtTime=d=>new Date(d).toLocaleTimeString("ar-SA",{hour:"2-digit",minute:"2-digit"});
 const fmtDate=d=>new Date(d).toLocaleDateString("ar-SA",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
-const getOppIdFromUrl=()=>new URLSearchParams(window.location.search).get("opp");
-const setOppInUrl=id=>{
-  const u=new URL(window.location.href);
-  u.searchParams.set("opp",id);
-  window.history.replaceState({},"",u.toString());
-};
+const getUrlId=()=>new URLSearchParams(window.location.search).get("opp");
+const setUrlId=id=>{const u=new URL(window.location.href);u.searchParams.set("opp",id);window.history.replaceState({},"",u.toString());};
 const clearUrl=()=>window.history.replaceState({},"",window.location.pathname);
 const pageUrl=id=>window.location.origin+window.location.pathname+"?opp="+id;
 
-// ── Colors ────────────────────────────────────────────────────────────────
-const CLAY="#C4956A",DARK="#1C1410",CARD="#FDFAF4",BORDER="#E8DCC8",ACCENT="#8B5E3C",GREEN="#2D7A4F",WA="#25D366";
+// Save items per restaurant
+function getRestItems(restaurant){
+  const all=LS.get(KEYS.REST_ITEMS)||{};
+  return all[restaurant]||[];
+}
+function saveRestItem(restaurant,itemName){
+  const all=LS.get(KEYS.REST_ITEMS)||{};
+  const cur=all[restaurant]||[];
+  if(!cur.includes(itemName)){
+    all[restaurant]=[itemName,...cur].slice(0,50);
+    LS.set(KEYS.REST_ITEMS,all);
+  }
+}
 
-// ── Icons ─────────────────────────────────────────────────────────────────
+// PIN helpers — store {oppId: pin}
+function saveOppPin(oppId,pin){
+  const m=LS.get(KEYS.MY_OPPS_PIN)||{};
+  m[oppId]=pin;
+  LS.set(KEYS.MY_OPPS_PIN,m);
+}
+function getOppPin(oppId){
+  const m=LS.get(KEYS.MY_OPPS_PIN)||{};
+  return m[oppId]||null;
+}
+function amICreator(oppId){
+  return !!getOppPin(oppId);
+}
+
+const CLAY="#C4956A",DARK="#1C1410",CARD="#FDFAF4",BORDER="#E8DCC8",ACCENT="#8B5E3C",GREEN="#2D7A4F",WA="#25D366";
 const sp={viewBox:"0 0 24 24",fill:"none",stroke:"currentColor"};
 const Ico={
   plus:  <svg {...sp} strokeWidth="2.5" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
@@ -96,18 +114,14 @@ const Ico={
   clock: <svg {...sp} strokeWidth="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
   rest:  <svg {...sp} strokeWidth="2" width="16" height="16"><path d="M18 8h1a4 4 0 010 8h-1"/><path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>,
   usr:   <svg {...sp} strokeWidth="2" width="16" height="16"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
-  home:  <svg {...sp} strokeWidth="2" width="16" height="16"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
 };
 
 const inp={width:"100%",padding:"11px 14px",borderRadius:12,border:"1.5px solid #E8DCC8",background:CARD,fontSize:14,color:DARK,outline:"none",boxSizing:"border-box",fontFamily:"inherit",direction:"rtl",transition:"border-color 0.15s"};
 
-// ── Shared Components ─────────────────────────────────────────────────────
 function TopBar({onBack,title,sub,right}){
   return(
     <div style={{background:DARK,padding:"16px",display:"flex",alignItems:"center",gap:12}}>
-      <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:10,padding:8,cursor:"pointer",color:"#fff",display:"flex",alignItems:"center",flexShrink:0}}>
-        {Ico.back}
-      </button>
+      <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:10,padding:8,cursor:"pointer",color:"#fff",display:"flex",alignItems:"center",flexShrink:0}}>{Ico.back}</button>
       <div style={{flex:1,minWidth:0}}>
         <h2 style={{fontSize:17,fontWeight:700,color:"#fff",margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</h2>
         {sub&&<div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:2}}>{sub}</div>}
@@ -129,38 +143,53 @@ function Btn({onClick,disabled,loading,children,color,style={}}){
   );
 }
 function Toast({msg}){return <div className="toast">{msg}</div>;}
-
-function Loading({text}){
+function Loading(){
   return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"60vh",gap:16}}>
       <span className="spin" style={{width:32,height:32,borderWidth:3,borderColor:"rgba(196,149,106,0.3)",borderTopColor:CLAY}}/>
-      <p style={{color:ACCENT,fontSize:14,margin:0}}>{text||"جاري التحميل..."}</p>
+      <p style={{color:ACCENT,fontSize:14,margin:0}}>جاري التحميل...</p>
+    </div>
+  );
+}
+
+// ── PIN Modal ─────────────────────────────────────────────────────────────
+function PinModal({title,onConfirm,onCancel,error}){
+  const [pin,setPin]=useState("");
+  return(
+    <div className="modal-bg">
+      <div className="modal">
+        <div style={{fontSize:16,fontWeight:700,color:DARK,marginBottom:6}}>{title}</div>
+        <div style={{fontSize:13,color:"#888",marginBottom:16}}>أدخل الرمز الذي اخترته عند إنشاء الفرصة</div>
+        <input style={{...inp,letterSpacing:8,textAlign:"center",fontSize:20}} type="password" maxLength={6} placeholder="••••" value={pin} onChange={e=>setPin(e.target.value)}/>
+        {error&&<div style={{fontSize:12,color:"#e55",marginTop:6,textAlign:"center"}}>{error}</div>}
+        <Btn onClick={()=>onConfirm(pin)} disabled={!pin}>تأكيد</Btn>
+        <button onClick={onCancel} style={{width:"100%",marginTop:8,padding:"10px",background:"none",border:"none",color:"#aaa",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>إلغاء</button>
+      </div>
     </div>
   );
 }
 
 // ── App ───────────────────────────────────────────────────────────────────
 function App(){
-  const [screen,setScreen] = useState("loading");
-  const [opp,setOpp]       = useState(null);
-  const [myOpps,setMyOpps] = useState([]);
-  const [rests,setRests]   = useState(()=>LS.get(KEYS.RESTS)||[]);
-  const [names,setNames]   = useState(()=>LS.get(KEYS.NAMES)||[]);
-  const [sitems,setSitems] = useState(()=>LS.get(KEYS.ITEMS)||[]);
-  const [now,setNow]       = useState(new Date());
-  const [toast,setToast]   = useState(null);
-  const toastRef           = useRef(null);
+  const [screen,setScreen]=useState("loading");
+  const [opp,setOpp]      =useState(null);
+  const [myOpps,setMyOpps]=useState([]);
+  const [rests,setRests]  =useState(()=>LS.get(KEYS.RESTS)||[]);
+  const [names,setNames]  =useState(()=>LS.get(KEYS.NAMES)||[]);
+  const [now,setNow]      =useState(new Date());
+  const [toast,setToast]  =useState(null);
+  const toastRef          =useRef(null);
 
   useEffect(()=>{
     const init=async()=>{
-      const id=getOppIdFromUrl();
+      const id=getUrlId();
       if(id){
         const data=await dbGet(id);
         if(data){setOpp(data);setScreen("opp");}
-        else{setScreen("home");}
+        else setScreen("home");
       } else {
-        // Load my opps list
-        const list=await dbList();
+        const ids=LS.get(KEYS.MY_IDS)||[];
+        const list=await dbList(ids);
         setMyOpps(list);
         setScreen("home");
       }
@@ -170,49 +199,41 @@ function App(){
     return()=>clearInterval(t);
   },[]);
 
-  const showToast=msg=>{
-    setToast(msg);
-    clearTimeout(toastRef.current);
-    toastRef.current=setTimeout(()=>setToast(null),2500);
-  };
+  const showToast=msg=>{setToast(msg);clearTimeout(toastRef.current);toastRef.current=setTimeout(()=>setToast(null),2500);};
+  const saveRests=l=>{setRests(l);LS.set(KEYS.RESTS,l);};
+  const saveNames=l=>{setNames(l);LS.set(KEYS.NAMES,l);};
 
-  const saveRests =l=>{setRests(l);LS.set(KEYS.RESTS,l);};
-  const saveNames =l=>{setNames(l);LS.set(KEYS.NAMES,l);};
-  const saveSitems=l=>{setSitems(l);LS.set(KEYS.ITEMS,l);};
-
-  const onCreated=async(newOpp,newR)=>{
+  const onCreated=async(newOpp,pin,newR)=>{
     if(newR&&!rests.includes(newR)) saveRests([...rests,newR]);
     await dbCreate(newOpp);
-    // Save id locally
     const ids=LS.get(KEYS.MY_IDS)||[];
     LS.set(KEYS.MY_IDS,[newOpp.id,...ids]);
+    saveOppPin(newOpp.id,pin);
     setMyOpps(prev=>[newOpp,...prev]);
     setOpp(newOpp);
-    setOppInUrl(newOpp.id);
+    setUrlId(newOpp.id);
     setScreen("opp");
   };
 
-  const updateOpp=async(updated)=>{
+  const updateOpp=async updated=>{
     setOpp(updated);
     await dbUpdate(updated);
   };
 
   const goHome=()=>{
-    clearUrl();
-    setOpp(null);
-    // Refresh my opps
-    dbList().then(list=>setMyOpps(list));
+    clearUrl();setOpp(null);
+    const ids=LS.get(KEYS.MY_IDS)||[];
+    dbList(ids).then(list=>setMyOpps(list));
     setScreen("home");
   };
 
-  if(screen==="loading") return <Loading text="جاري التحميل..."/>;
-
+  if(screen==="loading") return <Loading/>;
   return(
     <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:"#F5EFE0",position:"relative"}}>
       {toast&&<Toast msg={toast}/>}
-      {screen==="home"&&<HomeScreen now={now} myOpps={myOpps} onNew={()=>setScreen("create")} onOpen={o=>{setOpp(o);setOppInUrl(o.id);setScreen("opp");}}/>}
+      {screen==="home"&&<HomeScreen now={now} myOpps={myOpps} onNew={()=>setScreen("create")} onOpen={o=>{setOpp(o);setUrlId(o.id);setScreen("opp");}}/>}
       {screen==="create"&&<CreateScreen rests={rests} names={names} onBack={()=>setScreen("home")} onCreated={onCreated}/>}
-      {screen==="opp"&&opp&&<OppScreen opp={opp} names={names} sitems={sitems} onBack={goHome} onUpdate={updateOpp} onInvoice={()=>setScreen("invoice")} saveNames={saveNames} saveSitems={saveSitems} showToast={showToast}/>}
+      {screen==="opp"&&opp&&<OppScreen opp={opp} names={names} onBack={goHome} onUpdate={updateOpp} onInvoice={()=>setScreen("invoice")} saveNames={saveNames} showToast={showToast}/>}
       {screen==="invoice"&&opp&&<InvoiceScreen opp={opp} onBack={()=>setScreen("opp")} onUpdate={updateOpp}/>}
     </div>
   );
@@ -232,11 +253,9 @@ function HomeScreen({now,myOpps,onNew,onOpen}){
           <div style={{fontSize:17,fontWeight:600,color:CLAY}}>{fmtTime(now)}</div>
         </div>
       </div>
-
       <button onClick={onNew} style={{display:"flex",alignItems:"center",gap:8,background:CLAY,color:"#fff",border:"none",borderRadius:14,padding:"14px 20px",fontSize:15,fontWeight:700,width:"calc(100% - 32px)",margin:"16px 16px 0",cursor:"pointer",justifyContent:"center",boxShadow:"0 4px 14px rgba(196,149,106,0.35)",fontFamily:"inherit"}}>
         {Ico.plus}<span>فرصة طلب جديدة</span>
       </button>
-
       {myOpps.length===0&&(
         <div style={{textAlign:"center",padding:"56px 20px"}}>
           <div style={{fontSize:44,marginBottom:14}}>🍽️</div>
@@ -244,7 +263,6 @@ function HomeScreen({now,myOpps,onNew,onOpen}){
           <p style={{fontSize:13,color:"#aaa",marginTop:6}}>أنشئ فرصة وشاركها مع المجلس</p>
         </div>
       )}
-
       {active.length>0&&(
         <div style={{padding:"20px 16px 0"}}>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,marginBottom:10}}>مفتوحة</div>
@@ -260,7 +278,6 @@ function HomeScreen({now,myOpps,onNew,onOpen}){
     </div>
   );
 }
-
 function OppCard({opp,onClick,closed}){
   const people=opp.orders.length;
   const total=opp.orders.reduce((s,o)=>s+o.items.length,0);
@@ -286,15 +303,15 @@ function CreateScreen({rests,names,onBack,onCreated}){
   const [rest,setRest]      =useState("");
   const [customR,setCustomR]=useState("");
   const [showNew,setShowNew]=useState(false);
+  const [pin,setPin]        =useState("");
   const [loading,setLoading]=useState(false);
   const [time,setTime]      =useState(()=>{
     const d=new Date();d.setMinutes(d.getMinutes()+30);
     return d.toTimeString().slice(0,5);
   });
-
   const useCustom=showNew||rests.length===0;
   const restVal=useCustom?customR:rest;
-  const valid=creator.trim()&&restVal.trim()&&time&&!loading;
+  const valid=creator.trim()&&restVal.trim()&&time&&pin.length>=4&&!loading;
 
   const submit=async()=>{
     if(!valid) return;
@@ -303,11 +320,10 @@ function CreateScreen({rests,names,onBack,onCreated}){
       await onCreated({
         id:uid(),creator:creator.trim(),restaurant:restVal.trim(),
         suggestedTime:time,createdAt:Date.now(),
-        orders:[],closed:false,paymentMethod:"equal"
-      }, useCustom?restVal.trim():null);
-    } catch(e){
-      alert("حدث خطأ أثناء الحفظ، تأكد من الاتصال بالإنترنت");
-    }
+        orders:[],closed:false,paymentMethod:"equal",
+        pinHash:btoa(pin)
+      },pin,useCustom?restVal.trim():null);
+    }catch(e){alert("حدث خطأ أثناء الحفظ");}
     setLoading(false);
   };
 
@@ -336,6 +352,10 @@ function CreateScreen({rests,names,onBack,onCreated}){
         <Field label="الوقت المقترح">
           <input style={inp} type="time" value={time} onChange={e=>setTime(e.target.value)}/>
         </Field>
+        <Field label="رمز الإقفال (4 أرقام على الأقل)">
+          <input style={{...inp,letterSpacing:6,textAlign:"center"}} type="password" maxLength={6} placeholder="اختر رمزاً سرياً" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))}/>
+          <div style={{fontSize:11,color:"#aaa",marginTop:4}}>هذا الرمز يمكّنك فقط من إقفال الفرصة لاحقاً</div>
+        </Field>
         <Btn onClick={submit} disabled={!valid} loading={loading}>إنشاء الفرصة</Btn>
       </div>
     </div>
@@ -343,18 +363,23 @@ function CreateScreen({rests,names,onBack,onCreated}){
 }
 
 // ── Opportunity ───────────────────────────────────────────────────────────
-function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSitems,showToast}){
-  const [tab,setTab]       =useState("summary");
-  const [uname,setUname]   =useState("");
-  const [items,setItems]   =useState([{id:uid(),name:"",custom:""}]);
-  const [saving,setSaving] =useState(false);
+function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
+  const [tab,setTab]        =useState("summary");
+  const [uname,setUname]    =useState("");
+  const [items,setItems]    =useState([{id:uid(),name:"",custom:""}]);
+  const [saving,setSaving]  =useState(false);
+  const [pinModal,setPinModal]=useState(false);
+  const [pinError,setPinError]=useState("");
+  const isCreator           =amICreator(opp.id);
+  const restItems           =getRestItems(opp.restaurant);
 
+  // Build summary
   const summary={};
   opp.orders.forEach(o=>o.items.forEach(i=>{summary[i.name]=(summary[i.name]||0)+1;}));
 
-  const shareUrl=pageUrl(opp.id);
   const shareWA=()=>{
-    const text="🍽️ فرصة طلب من "+opp.restaurant+"\n⏰ الوقت المقترح: "+opp.suggestedTime+"\n👤 المنشئ: "+opp.creator+"\n\nاضغط الرابط لإضافة طلبك 👇\n"+shareUrl;
+    const url=pageUrl(opp.id);
+    const text="🍽️ فرصة طلب من "+opp.restaurant+"\n⏰ الوقت المقترح: "+opp.suggestedTime+"\n👤 المنشئ: "+opp.creator+"\n\nاضغط الرابط لإضافة طلبك 👇\n"+url;
     window.open("https://wa.me/?text="+encodeURIComponent(text),"_blank");
   };
 
@@ -366,12 +391,12 @@ function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSit
     try{
       await onUpdate(updated);
       if(!names.includes(uname.trim())) saveNames([...names,uname.trim()]);
-      const newI=valid.map(i=>i.name).filter(n=>!sitems.includes(n));
-      if(newI.length) saveSitems([...sitems,...newI]);
+      // Save items per restaurant
+      valid.forEach(i=>saveRestItem(opp.restaurant,i.name));
       setUname("");setItems([{id:uid(),name:"",custom:""}]);
       setTab("summary");
       showToast("تم إضافة طلبك ✓");
-    } catch(e){showToast("حدث خطأ، حاول مجدداً");}
+    }catch(e){showToast("حدث خطأ، حاول مجدداً");}
     setSaving(false);
   };
 
@@ -380,9 +405,29 @@ function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSit
     catch(e){showToast("حدث خطأ");}
   };
 
-  const closeOpp=async()=>{
+  const tryClose=()=>{
+    if(isCreator){
+      // Already verified creator on this device
+      doClose();
+    } else {
+      setPinModal(true);
+      setPinError("");
+    }
+  };
+
+  const doClose=async()=>{
     try{await onUpdate({...opp,closed:true});showToast("تم إقفال الفرصة");}
     catch(e){showToast("حدث خطأ");}
+  };
+
+  const confirmPin=(entered)=>{
+    if(btoa(entered)===opp.pinHash){
+      saveOppPin(opp.id,entered);
+      setPinModal(false);
+      doClose();
+    } else {
+      setPinError("الرمز غير صحيح");
+    }
   };
 
   const setItem=(idx,field,val)=>{const cp=[...items];cp[idx]={...cp[idx],[field]:val};setItems(cp);};
@@ -390,6 +435,7 @@ function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSit
 
   return(
     <div className="screen">
+      {pinModal&&<PinModal title="إقفال الفرصة" onConfirm={confirmPin} onCancel={()=>setPinModal(false)} error={pinError}/>}
       <TopBar onBack={onBack} title={opp.restaurant} sub={"⏰ "+opp.suggestedTime+" · بواسطة "+opp.creator}
         right={opp.closed?<span style={{background:"#333",color:"#aaa",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap",flexShrink:0}}>مغلقة</span>:null}/>
 
@@ -417,28 +463,40 @@ function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSit
 
       {tab==="summary"&&(
         <div>
+          {/* ── إجمالي المواد ── */}
           {Object.keys(summary).length>0&&(
             <div style={{background:DARK,borderRadius:16,margin:"16px 16px 0",padding:"16px"}}>
-              <div style={{fontSize:12,fontWeight:700,color:CLAY,marginBottom:10}}>إجمالي المواد</div>
+              <div style={{fontSize:12,fontWeight:700,color:CLAY,marginBottom:10,letterSpacing:0.5}}>إجمالي المواد للطلب</div>
               {Object.entries(summary).map(([name,count])=>(
-                <div key={name} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                  <span style={{fontSize:14,color:"#fff"}}>{name}</span>
-                  <span style={{fontSize:14,fontWeight:700,color:CLAY}}>× {count}</span>
+                <div key={name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+                  <span style={{fontSize:14,color:"#fff",fontWeight:500}}>{name}</span>
+                  <span style={{fontSize:16,fontWeight:700,color:CLAY}}>× {count}</span>
                 </div>
               ))}
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.35)",marginTop:10,textAlign:"center"}}>
+                {opp.orders.length} شخص · {opp.orders.reduce((s,o)=>s+o.items.length,0)} مادة
+              </div>
             </div>
           )}
+
           {opp.orders.length===0&&(
             <div style={{textAlign:"center",padding:"32px 20px"}}>
               <p style={{color:ACCENT,fontWeight:600,margin:0}}>لا يوجد طلبات حتى الآن</p>
               <p style={{color:"#aaa",fontSize:13,marginTop:6}}>شارك الرابط ليضيف الأعضاء طلباتهم</p>
             </div>
           )}
+
+          {/* ── تفصيل الأشخاص ── */}
+          {opp.orders.length>0&&(
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,padding:"16px 16px 8px"}}>تفصيل الأشخاص</div>
+          )}
           {opp.orders.map(order=>(
-            <div key={order.id} style={{background:CARD,border:"1px solid "+BORDER,borderRadius:14,margin:"12px 16px 0",padding:"12px 14px"}}>
+            <div key={order.id} style={{background:CARD,border:"1px solid "+BORDER,borderRadius:14,margin:"0 16px 10px",padding:"12px 14px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                 <span style={{display:"flex",alignItems:"center",gap:6,fontSize:14,fontWeight:700,color:DARK}}>{Ico.usr} {order.person}</span>
-                {!opp.closed&&<button onClick={()=>rmOrder(order.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",borderRadius:6}}>{Ico.trash}</button>}
+                {!opp.closed&&isCreator&&(
+                  <button onClick={()=>rmOrder(order.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",borderRadius:6}}>{Ico.trash}</button>
+                )}
               </div>
               {order.items.map(item=>(
                 <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:13,color:"#555"}}>
@@ -449,8 +507,9 @@ function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSit
               ))}
             </div>
           ))}
-          {!opp.closed&&opp.orders.length>0&&(
-            <button onClick={closeOpp} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"none",border:"1.5px solid "+BORDER,borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#888",cursor:"pointer",fontFamily:"inherit",width:"calc(100% - 32px)",margin:"16px 16px 0"}}>
+
+          {!opp.closed&&(
+            <button onClick={tryClose} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"none",border:"1.5px solid "+BORDER,borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#888",cursor:"pointer",fontFamily:"inherit",width:"calc(100% - 32px)",margin:"8px 16px 0"}}>
               {Ico.lock} إقفال الفرصة
             </button>
           )}
@@ -467,11 +526,13 @@ function OppScreen({opp,names,sitems,onBack,onUpdate,onInvoice,saveNames,saveSit
           {items.map((item,idx)=>(
             <div key={item.id} style={{marginBottom:10}}>
               <div style={{display:"flex",gap:8}}>
-                <input style={{...inp,flex:1}} placeholder={"مادة "+(idx+1)+" — مثل: همبرغر"} value={item.name} list="dl-items" onChange={e=>setItem(idx,"name",e.target.value)}/>
-                <input style={{...inp,flex:1}} placeholder="تخصيص — مثل: بدون شطة" value={item.custom} onChange={e=>setItem(idx,"custom",e.target.value)}/>
+                <input style={{...inp,flex:1}} placeholder={"مادة "+(idx+1)} value={item.name} list={"dl-ritems-"+idx}
+                  onChange={e=>setItem(idx,"name",e.target.value)}/>
+                <input style={{...inp,flex:1}} placeholder="تخصيص — مثل: بدون شطة" value={item.custom}
+                  onChange={e=>setItem(idx,"custom",e.target.value)}/>
                 {items.length>1&&<button onClick={()=>setItems(items.filter((_,i)=>i!==idx))} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",flexShrink:0,alignItems:"center"}}>{Ico.trash}</button>}
               </div>
-              <datalist id="dl-items">{sitems.map(n=><option key={n} value={n}/>)}</datalist>
+              <datalist id={"dl-ritems-"+idx}>{restItems.map(n=><option key={n} value={n}/>)}</datalist>
             </div>
           ))}
           <button onClick={()=>setItems([...items,{id:uid(),name:"",custom:""}])} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1.5px dashed "+BORDER,borderRadius:12,padding:"10px 16px",fontSize:13,fontWeight:600,color:CLAY,cursor:"pointer",fontFamily:"inherit",width:"100%",justifyContent:"center",marginBottom:4}}>
