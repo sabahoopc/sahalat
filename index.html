@@ -28,6 +28,8 @@ a{text-decoration:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
 .modal{background:#FDFAF4;border-radius:20px;padding:24px;width:100%;max-width:340px}
+.qty-btn{width:30px;height:30px;border-radius:8px;border:1.5px solid #E8DCC8;background:#FDFAF4;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#1C1410}
+.qty-btn:active{background:#E8DCC8}
 </style>
 </head>
 <body>
@@ -73,7 +75,7 @@ const setUrlId=id=>{const u=new URL(window.location.href);u.searchParams.set("op
 const clearUrl=()=>window.history.replaceState({},"",window.location.pathname);
 const pageUrl=id=>window.location.origin+window.location.pathname+"?opp="+id;
 
-// Save items per restaurant
+// Items per restaurant (for suggestions)
 function getRestItems(restaurant){
   const all=LS.get(KEYS.REST_ITEMS)||{};
   return all[restaurant]||[];
@@ -81,24 +83,33 @@ function getRestItems(restaurant){
 function saveRestItem(restaurant,itemName){
   const all=LS.get(KEYS.REST_ITEMS)||{};
   const cur=all[restaurant]||[];
-  if(!cur.includes(itemName)){
-    all[restaurant]=[itemName,...cur].slice(0,50);
+  if(!cur.map(x=>x.toLowerCase()).includes(itemName.toLowerCase())){
+    all[restaurant]=[itemName,...cur].slice(0,80);
     LS.set(KEYS.REST_ITEMS,all);
   }
 }
 
-// PIN helpers — store {oppId: pin}
-function saveOppPin(oppId,pin){
-  const m=LS.get(KEYS.MY_OPPS_PIN)||{};
-  m[oppId]=pin;
-  LS.set(KEYS.MY_OPPS_PIN,m);
+// Get all item names used in this opp (for in-opp suggestions — solves naming inconsistency)
+function getOppItemNames(opp){
+  const names=[];
+  opp.orders.forEach(o=>o.items.forEach(i=>{
+    if(!names.map(x=>x.toLowerCase()).includes(i.name.toLowerCase())) names.push(i.name);
+  }));
+  return names;
 }
-function getOppPin(oppId){
-  const m=LS.get(KEYS.MY_OPPS_PIN)||{};
-  return m[oppId]||null;
-}
-function amICreator(oppId){
-  return !!getOppPin(oppId);
+
+function saveOppPin(oppId,pin){const m=LS.get(KEYS.MY_OPPS_PIN)||{};m[oppId]=pin;LS.set(KEYS.MY_OPPS_PIN,m);}
+function getOppPin(oppId){const m=LS.get(KEYS.MY_OPPS_PIN)||{};return m[oppId]||null;}
+function amICreator(oppId){return !!getOppPin(oppId);}
+
+// Build summary: key = "name||customization", value = total qty
+function buildSummary(orders){
+  const map={};
+  orders.forEach(o=>o.items.forEach(i=>{
+    const key=i.name+(i.customization?(" | "+i.customization):"");
+    map[key]=(map[key]||0)+(i.qty||1);
+  }));
+  return map;
 }
 
 const CLAY="#C4956A",DARK="#1C1410",CARD="#FDFAF4",BORDER="#E8DCC8",ACCENT="#8B5E3C",GREEN="#2D7A4F",WA="#25D366";
@@ -152,7 +163,6 @@ function Loading(){
   );
 }
 
-// ── PIN Modal ─────────────────────────────────────────────────────────────
 function PinModal({title,onConfirm,onCancel,error}){
   const [pin,setPin]=useState("");
   return(
@@ -165,6 +175,17 @@ function PinModal({title,onConfirm,onCancel,error}){
         <Btn onClick={()=>onConfirm(pin)} disabled={!pin}>تأكيد</Btn>
         <button onClick={onCancel} style={{width:"100%",marginTop:8,padding:"10px",background:"none",border:"none",color:"#aaa",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>إلغاء</button>
       </div>
+    </div>
+  );
+}
+
+// ── Quantity control ──────────────────────────────────────────────────────
+function QtyControl({value,onChange}){
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+      <button className="qty-btn" onClick={()=>onChange(Math.max(1,value-1))}>−</button>
+      <span style={{fontSize:14,fontWeight:700,minWidth:18,textAlign:"center",color:DARK}}>{value}</span>
+      <button className="qty-btn" onClick={()=>onChange(value+1)}>+</button>
     </div>
   );
 }
@@ -183,16 +204,8 @@ function App(){
   useEffect(()=>{
     const init=async()=>{
       const id=getUrlId();
-      if(id){
-        const data=await dbGet(id);
-        if(data){setOpp(data);setScreen("opp");}
-        else setScreen("home");
-      } else {
-        const ids=LS.get(KEYS.MY_IDS)||[];
-        const list=await dbList(ids);
-        setMyOpps(list);
-        setScreen("home");
-      }
+      if(id){const data=await dbGet(id);if(data){setOpp(data);setScreen("opp");}else setScreen("home");}
+      else{const ids=LS.get(KEYS.MY_IDS)||[];const list=await dbList(ids);setMyOpps(list);setScreen("home");}
     };
     init();
     const t=setInterval(()=>setNow(new Date()),30000);
@@ -210,22 +223,11 @@ function App(){
     LS.set(KEYS.MY_IDS,[newOpp.id,...ids]);
     saveOppPin(newOpp.id,pin);
     setMyOpps(prev=>[newOpp,...prev]);
-    setOpp(newOpp);
-    setUrlId(newOpp.id);
-    setScreen("opp");
+    setOpp(newOpp);setUrlId(newOpp.id);setScreen("opp");
   };
 
-  const updateOpp=async updated=>{
-    setOpp(updated);
-    await dbUpdate(updated);
-  };
-
-  const goHome=()=>{
-    clearUrl();setOpp(null);
-    const ids=LS.get(KEYS.MY_IDS)||[];
-    dbList(ids).then(list=>setMyOpps(list));
-    setScreen("home");
-  };
+  const updateOpp=async updated=>{setOpp(updated);await dbUpdate(updated);};
+  const goHome=()=>{clearUrl();setOpp(null);const ids=LS.get(KEYS.MY_IDS)||[];dbList(ids).then(list=>setMyOpps(list));setScreen("home");};
 
   if(screen==="loading") return <Loading/>;
   return(
@@ -256,31 +258,15 @@ function HomeScreen({now,myOpps,onNew,onOpen}){
       <button onClick={onNew} style={{display:"flex",alignItems:"center",gap:8,background:CLAY,color:"#fff",border:"none",borderRadius:14,padding:"14px 20px",fontSize:15,fontWeight:700,width:"calc(100% - 32px)",margin:"16px 16px 0",cursor:"pointer",justifyContent:"center",boxShadow:"0 4px 14px rgba(196,149,106,0.35)",fontFamily:"inherit"}}>
         {Ico.plus}<span>فرصة طلب جديدة</span>
       </button>
-      {myOpps.length===0&&(
-        <div style={{textAlign:"center",padding:"56px 20px"}}>
-          <div style={{fontSize:44,marginBottom:14}}>🍽️</div>
-          <p style={{fontSize:15,color:ACCENT,margin:0,fontWeight:600}}>لا توجد فرص طلب حتى الآن</p>
-          <p style={{fontSize:13,color:"#aaa",marginTop:6}}>أنشئ فرصة وشاركها مع المجلس</p>
-        </div>
-      )}
-      {active.length>0&&(
-        <div style={{padding:"20px 16px 0"}}>
-          <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,marginBottom:10}}>مفتوحة</div>
-          {active.map(o=><OppCard key={o.id} opp={o} onClick={()=>onOpen(o)}/>)}
-        </div>
-      )}
-      {closed.length>0&&(
-        <div style={{padding:"12px 16px 0"}}>
-          <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,marginBottom:10,opacity:0.5}}>مغلقة</div>
-          {closed.map(o=><OppCard key={o.id} opp={o} onClick={()=>onOpen(o)} closed/>)}
-        </div>
-      )}
+      {myOpps.length===0&&(<div style={{textAlign:"center",padding:"56px 20px"}}><div style={{fontSize:44,marginBottom:14}}>🍽️</div><p style={{fontSize:15,color:ACCENT,margin:0,fontWeight:600}}>لا توجد فرص طلب حتى الآن</p><p style={{fontSize:13,color:"#aaa",marginTop:6}}>أنشئ فرصة وشاركها مع المجلس</p></div>)}
+      {active.length>0&&(<div style={{padding:"20px 16px 0"}}><div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,marginBottom:10}}>مفتوحة</div>{active.map(o=><OppCard key={o.id} opp={o} onClick={()=>onOpen(o)}/>)}</div>)}
+      {closed.length>0&&(<div style={{padding:"12px 16px 0"}}><div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,marginBottom:10,opacity:0.5}}>مغلقة</div>{closed.map(o=><OppCard key={o.id} opp={o} onClick={()=>onOpen(o)} closed/>)}</div>)}
     </div>
   );
 }
 function OppCard({opp,onClick,closed}){
   const people=opp.orders.length;
-  const total=opp.orders.reduce((s,o)=>s+o.items.length,0);
+  const total=opp.orders.reduce((s,o)=>s+o.items.reduce((ss,i)=>ss+(i.qty||1),0),0);
   return(
     <div className="opp-card" onClick={onClick} style={{background:CARD,border:"1px solid "+BORDER,borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:"0 2px 8px rgba(28,20,16,0.06)",opacity:closed?0.6:1}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -289,7 +275,7 @@ function OppCard({opp,onClick,closed}){
       </div>
       <div style={{display:"flex",gap:14,marginBottom:6}}>
         <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:ACCENT}}>{Ico.usr}<span>{people} شخص</span></span>
-        <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:ACCENT}}>{Ico.rcpt}<span>{total} مادة</span></span>
+        <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:ACCENT}}>{Ico.rcpt}<span>{total} قطعة</span></span>
         <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:ACCENT}}>{Ico.clock}<span>{opp.suggestedTime}</span></span>
       </div>
       <div style={{fontSize:11,color:"#999"}}>بواسطة {opp.creator}</div>
@@ -305,53 +291,28 @@ function CreateScreen({rests,names,onBack,onCreated}){
   const [showNew,setShowNew]=useState(false);
   const [pin,setPin]        =useState("");
   const [loading,setLoading]=useState(false);
-  const [time,setTime]      =useState(()=>{
-    const d=new Date();d.setMinutes(d.getMinutes()+30);
-    return d.toTimeString().slice(0,5);
-  });
+  const [time,setTime]      =useState(()=>{const d=new Date();d.setMinutes(d.getMinutes()+30);return d.toTimeString().slice(0,5);});
   const useCustom=showNew||rests.length===0;
   const restVal=useCustom?customR:rest;
   const valid=creator.trim()&&restVal.trim()&&time&&pin.length>=4&&!loading;
-
   const submit=async()=>{
     if(!valid) return;
     setLoading(true);
-    try{
-      await onCreated({
-        id:uid(),creator:creator.trim(),restaurant:restVal.trim(),
-        suggestedTime:time,createdAt:Date.now(),
-        orders:[],closed:false,paymentMethod:"equal",
-        pinHash:btoa(pin)
-      },pin,useCustom?restVal.trim():null);
-    }catch(e){alert("حدث خطأ أثناء الحفظ");}
+    try{await onCreated({id:uid(),creator:creator.trim(),restaurant:restVal.trim(),suggestedTime:time,createdAt:Date.now(),orders:[],closed:false,paymentMethod:"equal",pinHash:btoa(pin)},pin,useCustom?restVal.trim():null);}
+    catch(e){alert("حدث خطأ أثناء الحفظ");}
     setLoading(false);
   };
-
   return(
     <div className="screen">
       <TopBar onBack={onBack} title="فرصة طلب جديدة"/>
       <div style={{padding:"20px 16px"}}>
-        <Field label="اسمك">
-          <input style={inp} placeholder="اكتب اسمك" value={creator} onChange={e=>setCreator(e.target.value)} list="dl-c-names"/>
-          <datalist id="dl-c-names">{names.map(n=><option key={n} value={n}/>)}</datalist>
-        </Field>
+        <Field label="اسمك"><input style={inp} placeholder="اكتب اسمك" value={creator} onChange={e=>setCreator(e.target.value)} list="dl-c-names"/><datalist id="dl-c-names">{names.map(n=><option key={n} value={n}/>)}</datalist></Field>
         <Field label="المطعم">
-          {rests.length>0&&!showNew&&(
-            <select style={{...inp,marginBottom:6}} value={rest} onChange={e=>setRest(e.target.value)}>
-              <option value="">اختر مطعمًا</option>
-              {rests.map(r=><option key={r} value={r}>{r}</option>)}
-            </select>
-          )}
+          {rests.length>0&&!showNew&&(<select style={{...inp,marginBottom:6}} value={rest} onChange={e=>setRest(e.target.value)}><option value="">اختر مطعمًا</option>{rests.map(r=><option key={r} value={r}>{r}</option>)}</select>)}
           {useCustom&&<input style={inp} placeholder="اسم المطعم" value={customR} onChange={e=>setCustomR(e.target.value)}/>}
-          {rests.length>0&&(
-            <button onClick={()=>{setShowNew(!showNew);setRest("");setCustomR("");}} style={{background:"none",border:"none",color:CLAY,fontSize:13,cursor:"pointer",padding:"4px 0",fontWeight:600,fontFamily:"inherit",marginTop:6,display:"block"}}>
-              {showNew?"← اختر من المحفوظة":"+ أضف مطعم جديد"}
-            </button>
-          )}
+          {rests.length>0&&(<button onClick={()=>{setShowNew(!showNew);setRest("");setCustomR("");}} style={{background:"none",border:"none",color:CLAY,fontSize:13,cursor:"pointer",padding:"4px 0",fontWeight:600,fontFamily:"inherit",marginTop:6,display:"block"}}>{showNew?"← اختر من المحفوظة":"+ أضف مطعم جديد"}</button>)}
         </Field>
-        <Field label="الوقت المقترح">
-          <input style={inp} type="time" value={time} onChange={e=>setTime(e.target.value)}/>
-        </Field>
+        <Field label="الوقت المقترح"><input style={inp} type="time" value={time} onChange={e=>setTime(e.target.value)}/></Field>
         <Field label="رمز الإقفال (4 أرقام على الأقل)">
           <input style={{...inp,letterSpacing:6,textAlign:"center"}} type="password" maxLength={6} placeholder="اختر رمزاً سرياً" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))}/>
           <div style={{fontSize:11,color:"#aaa",marginTop:4}}>هذا الرمز يمكّنك فقط من إقفال الفرصة لاحقاً</div>
@@ -364,18 +325,21 @@ function CreateScreen({rests,names,onBack,onCreated}){
 
 // ── Opportunity ───────────────────────────────────────────────────────────
 function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
-  const [tab,setTab]        =useState("summary");
-  const [uname,setUname]    =useState("");
-  const [items,setItems]    =useState([{id:uid(),name:"",custom:""}]);
-  const [saving,setSaving]  =useState(false);
+  const [tab,setTab]         =useState("summary");
+  const [uname,setUname]     =useState("");
+  const [items,setItems]     =useState([{id:uid(),name:"",custom:"",qty:1}]);
+  const [saving,setSaving]   =useState(false);
   const [pinModal,setPinModal]=useState(false);
   const [pinError,setPinError]=useState("");
-  const isCreator           =amICreator(opp.id);
-  const restItems           =getRestItems(opp.restaurant);
+  const isCreator            =amICreator(opp.id);
 
-  // Build summary
-  const summary={};
-  opp.orders.forEach(o=>o.items.forEach(i=>{summary[i.name]=(summary[i.name]||0)+1;}));
+  // Suggestions: opp items first (for consistency), then saved per restaurant
+  const oppNames   = getOppItemNames(opp);
+  const restItems  = getRestItems(opp.restaurant);
+  const suggestions= [...new Set([...oppNames,...restItems])];
+
+  const summary=buildSummary(opp.orders);
+  const totalQty=opp.orders.reduce((s,o)=>s+o.items.reduce((ss,i)=>ss+(i.qty||1),0),0);
 
   const shareWA=()=>{
     const url=pageUrl(opp.id);
@@ -386,16 +350,14 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
   const addOrder=async()=>{
     if(!uname.trim()||items.every(i=>!i.name.trim())) return;
     setSaving(true);
-    const valid=items.filter(i=>i.name.trim()).map(i=>({id:i.id,name:i.name.trim(),customization:i.custom.trim(),price:""}));
+    const valid=items.filter(i=>i.name.trim()).map(i=>({id:i.id,name:i.name.trim(),customization:i.custom.trim(),qty:i.qty||1,price:""}));
     const updated={...opp,orders:[...opp.orders,{id:uid(),person:uname.trim(),items:valid}]};
     try{
       await onUpdate(updated);
       if(!names.includes(uname.trim())) saveNames([...names,uname.trim()]);
-      // Save items per restaurant
       valid.forEach(i=>saveRestItem(opp.restaurant,i.name));
-      setUname("");setItems([{id:uid(),name:"",custom:""}]);
-      setTab("summary");
-      showToast("تم إضافة طلبك ✓");
+      setUname("");setItems([{id:uid(),name:"",custom:"",qty:1}]);
+      setTab("summary");showToast("تم إضافة طلبك ✓");
     }catch(e){showToast("حدث خطأ، حاول مجدداً");}
     setSaving(false);
   };
@@ -405,30 +367,9 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
     catch(e){showToast("حدث خطأ");}
   };
 
-  const tryClose=()=>{
-    if(isCreator){
-      // Already verified creator on this device
-      doClose();
-    } else {
-      setPinModal(true);
-      setPinError("");
-    }
-  };
-
-  const doClose=async()=>{
-    try{await onUpdate({...opp,closed:true});showToast("تم إقفال الفرصة");}
-    catch(e){showToast("حدث خطأ");}
-  };
-
-  const confirmPin=(entered)=>{
-    if(btoa(entered)===opp.pinHash){
-      saveOppPin(opp.id,entered);
-      setPinModal(false);
-      doClose();
-    } else {
-      setPinError("الرمز غير صحيح");
-    }
-  };
+  const tryClose=()=>{if(isCreator){doClose();}else{setPinModal(true);setPinError("");}};
+  const doClose=async()=>{try{await onUpdate({...opp,closed:true});showToast("تم إقفال الفرصة");}catch(e){showToast("حدث خطأ");}};
+  const confirmPin=(entered)=>{if(btoa(entered)===opp.pinHash){saveOppPin(opp.id,entered);setPinModal(false);doClose();}else{setPinError("الرمز غير صحيح");}};
 
   const setItem=(idx,field,val)=>{const cp=[...items];cp[idx]={...cp[idx],[field]:val};setItems(cp);};
   const canAdd=uname.trim()&&items.some(i=>i.name.trim());
@@ -451,55 +392,46 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
       </div>
 
       <div style={{display:"flex",padding:"14px 16px 0",borderBottom:"1px solid "+BORDER}}>
-        <button onClick={()=>setTab("summary")} style={{flex:1,padding:"10px",background:"none",border:"none",borderBottom:"2px solid "+(tab==="summary"?CLAY:"transparent"),fontSize:13,fontWeight:600,color:tab==="summary"?DARK:"#aaa",cursor:"pointer",fontFamily:"inherit"}}>
-          ملخص الطلبات
-        </button>
-        {!opp.closed&&(
-          <button onClick={()=>setTab("add")} style={{flex:1,padding:"10px",background:"none",border:"none",borderBottom:"2px solid "+(tab==="add"?CLAY:"transparent"),fontSize:13,fontWeight:600,color:tab==="add"?DARK:"#aaa",cursor:"pointer",fontFamily:"inherit"}}>
-            + أضف طلبك
-          </button>
-        )}
+        <button onClick={()=>setTab("summary")} style={{flex:1,padding:"10px",background:"none",border:"none",borderBottom:"2px solid "+(tab==="summary"?CLAY:"transparent"),fontSize:13,fontWeight:600,color:tab==="summary"?DARK:"#aaa",cursor:"pointer",fontFamily:"inherit"}}>ملخص الطلبات</button>
+        {!opp.closed&&(<button onClick={()=>setTab("add")} style={{flex:1,padding:"10px",background:"none",border:"none",borderBottom:"2px solid "+(tab==="add"?CLAY:"transparent"),fontSize:13,fontWeight:600,color:tab==="add"?DARK:"#aaa",cursor:"pointer",fontFamily:"inherit"}}>+ أضف طلبك</button>)}
       </div>
 
       {tab==="summary"&&(
         <div>
-          {/* ── إجمالي المواد ── */}
           {Object.keys(summary).length>0&&(
             <div style={{background:DARK,borderRadius:16,margin:"16px 16px 0",padding:"16px"}}>
-              <div style={{fontSize:12,fontWeight:700,color:CLAY,marginBottom:10,letterSpacing:0.5}}>إجمالي المواد للطلب</div>
-              {Object.entries(summary).map(([name,count])=>(
-                <div key={name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
-                  <span style={{fontSize:14,color:"#fff",fontWeight:500}}>{name}</span>
-                  <span style={{fontSize:16,fontWeight:700,color:CLAY}}>× {count}</span>
-                </div>
-              ))}
-              <div style={{fontSize:11,color:"rgba(255,255,255,0.35)",marginTop:10,textAlign:"center"}}>
-                {opp.orders.length} شخص · {opp.orders.reduce((s,o)=>s+o.items.length,0)} مادة
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:CLAY}}>إجمالي المواد للطلب</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,0.4)"}}>{opp.orders.length} شخص · {totalQty} قطعة</div>
               </div>
+              {Object.entries(summary).map(([key,count])=>{
+                const hasCustom=key.includes(" | ");
+                const [name,custom]=hasCustom?key.split(" | "):[key,""];
+                return(
+                  <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+                    <div>
+                      <span style={{fontSize:14,color:"#fff",fontWeight:500}}>{name}</span>
+                      {custom&&<span style={{fontSize:12,color:"rgba(255,255,255,0.45)",marginRight:6}}>({custom})</span>}
+                    </div>
+                    <span style={{fontSize:16,fontWeight:700,color:CLAY,flexShrink:0}}>× {count}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {opp.orders.length===0&&(
-            <div style={{textAlign:"center",padding:"32px 20px"}}>
-              <p style={{color:ACCENT,fontWeight:600,margin:0}}>لا يوجد طلبات حتى الآن</p>
-              <p style={{color:"#aaa",fontSize:13,marginTop:6}}>شارك الرابط ليضيف الأعضاء طلباتهم</p>
-            </div>
-          )}
+          {opp.orders.length===0&&(<div style={{textAlign:"center",padding:"32px 20px"}}><p style={{color:ACCENT,fontWeight:600,margin:0}}>لا يوجد طلبات حتى الآن</p><p style={{color:"#aaa",fontSize:13,marginTop:6}}>شارك الرابط ليضيف الأعضاء طلباتهم</p></div>)}
 
-          {/* ── تفصيل الأشخاص ── */}
-          {opp.orders.length>0&&(
-            <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,padding:"16px 16px 8px"}}>تفصيل الأشخاص</div>
-          )}
+          {opp.orders.length>0&&(<div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:ACCENT,padding:"16px 16px 8px"}}>تفصيل الأشخاص</div>)}
           {opp.orders.map(order=>(
             <div key={order.id} style={{background:CARD,border:"1px solid "+BORDER,borderRadius:14,margin:"0 16px 10px",padding:"12px 14px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                 <span style={{display:"flex",alignItems:"center",gap:6,fontSize:14,fontWeight:700,color:DARK}}>{Ico.usr} {order.person}</span>
-                {!opp.closed&&isCreator&&(
-                  <button onClick={()=>rmOrder(order.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",borderRadius:6}}>{Ico.trash}</button>
-                )}
+                {!opp.closed&&isCreator&&(<button onClick={()=>rmOrder(order.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",borderRadius:6}}>{Ico.trash}</button>)}
               </div>
               {order.items.map(item=>(
                 <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:13,color:"#555"}}>
+                  {(item.qty||1)>1&&<span style={{background:CLAY,color:"#fff",fontSize:11,fontWeight:700,padding:"1px 6px",borderRadius:6,flexShrink:0}}>×{item.qty}</span>}
                   <span style={{fontWeight:500}}>{item.name}</span>
                   {item.customization&&<span style={{color:"#999",fontSize:12}}>({item.customization})</span>}
                   {item.price&&<span style={{marginRight:"auto",color:GREEN,fontWeight:700,fontSize:12}}>{item.price} ر.س</span>}
@@ -508,11 +440,7 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
             </div>
           ))}
 
-          {!opp.closed&&(
-            <button onClick={tryClose} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"none",border:"1.5px solid "+BORDER,borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#888",cursor:"pointer",fontFamily:"inherit",width:"calc(100% - 32px)",margin:"8px 16px 0"}}>
-              {Ico.lock} إقفال الفرصة
-            </button>
-          )}
+          {!opp.closed&&(<button onClick={tryClose} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"none",border:"1.5px solid "+BORDER,borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#888",cursor:"pointer",fontFamily:"inherit",width:"calc(100% - 32px)",margin:"8px 16px 0"}}>{Ico.lock} إقفال الفرصة</button>)}
         </div>
       )}
 
@@ -524,18 +452,21 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
           </Field>
           <div style={{fontSize:13,fontWeight:600,color:ACCENT,marginBottom:8}}>مواد الطلب</div>
           {items.map((item,idx)=>(
-            <div key={item.id} style={{marginBottom:10}}>
-              <div style={{display:"flex",gap:8}}>
-                <input style={{...inp,flex:1}} placeholder={"مادة "+(idx+1)} value={item.name} list={"dl-ritems-"+idx}
+            <div key={item.id} style={{background:CARD,border:"1px solid "+BORDER,borderRadius:12,padding:"10px 12px",marginBottom:10}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                <input style={{...inp,flex:1,padding:"9px 12px"}} placeholder={"مادة "+(idx+1)+" — مثل: همبرغر"} value={item.name} list={"dl-si-"+idx}
                   onChange={e=>setItem(idx,"name",e.target.value)}/>
-                <input style={{...inp,flex:1}} placeholder="تخصيص — مثل: بدون شطة" value={item.custom}
-                  onChange={e=>setItem(idx,"custom",e.target.value)}/>
-                {items.length>1&&<button onClick={()=>setItems(items.filter((_,i)=>i!==idx))} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",flexShrink:0,alignItems:"center"}}>{Ico.trash}</button>}
+                <datalist id={"dl-si-"+idx}>{suggestions.map(n=><option key={n} value={n}/>)}</datalist>
+                {items.length>1&&<button onClick={()=>setItems(items.filter((_,i)=>i!==idx))} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",flexShrink:0}}>{Ico.trash}</button>}
               </div>
-              <datalist id={"dl-ritems-"+idx}>{restItems.map(n=><option key={n} value={n}/>)}</datalist>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input style={{...inp,flex:1,padding:"9px 12px",fontSize:13}} placeholder="تخصيص — مثل: بدون شطة" value={item.custom}
+                  onChange={e=>setItem(idx,"custom",e.target.value)}/>
+                <QtyControl value={item.qty||1} onChange={v=>setItem(idx,"qty",v)}/>
+              </div>
             </div>
           ))}
-          <button onClick={()=>setItems([...items,{id:uid(),name:"",custom:""}])} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1.5px dashed "+BORDER,borderRadius:12,padding:"10px 16px",fontSize:13,fontWeight:600,color:CLAY,cursor:"pointer",fontFamily:"inherit",width:"100%",justifyContent:"center",marginBottom:4}}>
+          <button onClick={()=>setItems([...items,{id:uid(),name:"",custom:"",qty:1}])} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1.5px dashed "+BORDER,borderRadius:12,padding:"10px 16px",fontSize:13,fontWeight:600,color:CLAY,cursor:"pointer",fontFamily:"inherit",width:"100%",justifyContent:"center",marginBottom:4}}>
             {Ico.plus} أضف مادة
           </button>
           <Btn onClick={addOrder} disabled={!canAdd} loading={saving}>حفظ الطلب</Btn>
@@ -556,15 +487,14 @@ function InvoiceScreen({opp,onBack,onUpdate}){
   const [saving,setSaving]=useState(false);
 
   const allNames=[...new Set(opp.orders.flatMap(o=>o.items.map(i=>i.name)))];
-  const getTotal=order=>order.items.reduce((s,i)=>s+(parseFloat(prices[i.name]||0)),0);
+  const getTotal=order=>order.items.reduce((s,i)=>s+((parseFloat(prices[i.name]||0))*(i.qty||1)),0);
   const grand=opp.orders.reduce((s,o)=>s+getTotal(o),0);
   const share=opp.orders.length>0?grand/opp.orders.length:0;
 
   const save=async()=>{
     setSaving(true);
     const updated={...opp,paymentMethod:method,orders:opp.orders.map(o=>({...o,items:o.items.map(i=>({...i,price:prices[i.name]||""}))}))} ;
-    await onUpdate(updated);
-    setSaving(false);
+    await onUpdate(updated);setSaving(false);
   };
 
   return(
@@ -582,7 +512,7 @@ function InvoiceScreen({opp,onBack,onUpdate}){
       </div>
       {allNames.length>0&&(
         <div style={{padding:"16px 16px 0"}}>
-          <div style={{fontSize:11,fontWeight:700,color:ACCENT,marginBottom:10,letterSpacing:1}}>أسعار المواد (اختياري)</div>
+          <div style={{fontSize:11,fontWeight:700,color:ACCENT,marginBottom:10,letterSpacing:1}}>سعر الوحدة لكل مادة (اختياري)</div>
           {allNames.map(name=>(
             <div key={name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:"1px solid "+BORDER}}>
               <span style={{flex:1,fontSize:14,fontWeight:500}}>{name}</span>
@@ -592,9 +522,7 @@ function InvoiceScreen({opp,onBack,onUpdate}){
           ))}
         </div>
       )}
-      <div style={{padding:"0 16px"}}>
-        <Btn onClick={save} loading={saving}>حفظ الأسعار</Btn>
-      </div>
+      <div style={{padding:"0 16px"}}><Btn onClick={save} loading={saving}>حفظ الأسعار</Btn></div>
       <div style={{fontSize:11,fontWeight:700,color:ACCENT,padding:"20px 16px 8px",letterSpacing:1}}>تفصيل الأشخاص</div>
       {opp.orders.map(order=>{
         const total=getTotal(order);
@@ -607,9 +535,10 @@ function InvoiceScreen({opp,onBack,onUpdate}){
             </div>
             {order.items.map(item=>(
               <div key={item.id} style={{display:"flex",alignItems:"center",fontSize:13,color:"#555",padding:"3px 0",gap:6}}>
+                {(item.qty||1)>1&&<span style={{background:"#eee",fontSize:11,fontWeight:700,padding:"1px 5px",borderRadius:5,flexShrink:0}}>×{item.qty}</span>}
                 <span style={{fontWeight:500}}>{item.name}</span>
                 {item.customization&&<span style={{color:"#999",fontSize:12}}>({item.customization})</span>}
-                {prices[item.name]&&<span style={{marginRight:"auto",color:GREEN,fontWeight:700,fontSize:12}}>{prices[item.name]} ر.س</span>}
+                {prices[item.name]&&<span style={{marginRight:"auto",color:GREEN,fontWeight:700,fontSize:12}}>{((parseFloat(prices[item.name]))*(item.qty||1)).toFixed(2)} ر.س</span>}
               </div>
             ))}
           </div>
