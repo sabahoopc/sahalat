@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>سَهالات</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #F5EFE0; }
+    body { font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif; direction: rtl; }
+    #root { max-width: 480px; margin: 0 auto; min-height: 100vh; }
+    .btn-create:active { transform: scale(0.97) !important; }
+    .btn-submit:active { transform: scale(0.98) !important; }
+    .opp-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(28,20,16,0.1) !important; }
+    input:focus, select:focus { border-color: #C4956A !important; outline: none; }
+    select { -webkit-appearance: none; appearance: none; }
+    input[type="time"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #C4956A44; border-radius: 4px; }
+    .screen { padding-bottom: 80px; min-height: 100vh; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+const LS = {
+  get: (key) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } },
+  set: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
+};
+const KEYS = { OPPS: "sahalat_opps", RESTAURANTS: "sahalat_restaurants", NAMES: "sahalat_names", ITEMS: "sahalat_items" };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const genId = () => Math.random().toString(36).slice(2, 10);
+const fmtTime = (d) => new Date(d).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+const fmtDate = (d) => new Date(d).toLocaleDateString("ar-SA", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+// ── SVG Icons ─────────────────────────────────────────────────────────────────
+const IC = {
+  plus:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  share:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>,
+  rcpt:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>,
+  lock:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
+  back:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20"><polyline points="15 18 9 12 15 6"/></svg>,
+  trash:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
+  check:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="16" height="16"><polyline points="20 6 9 17 4 12"/></svg>,
+  clock:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  rest:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M18 8h1a4 4 0 010 8h-1"/><path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>,
+  user:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+};
+
+// ── Colors ────────────────────────────────────────────────────────────────────
+const C = { SAND:"#F5EFE0", CLAY:"#C4956A", DARK:"#1C1410", CARD:"#FDFAF4", BORDER:"#E8DCC8", ACCENT:"#8B5E3C", GREEN:"#2D7A4F", WA:"#25D366" };
+
+// ─────────────────────────────────────────────────────────────────────────────
+function App() {
+  const [screen, setScreen] = useState("home");
+  const [opps, setOpps] = useState(() => LS.get(KEYS.OPPS) || []);
+  const [restaurants, setRestaurants] = useState(() => LS.get(KEYS.RESTAURANTS) || []);
+  const [savedNames, setSavedNames] = useState(() => LS.get(KEYS.NAMES) || []);
+  const [savedItems, setSavedItems] = useState(() => LS.get(KEYS.ITEMS) || []);
+  const [currentOpp, setCurrentOpp] = useState(null);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
+
+  const saveOpps = (list) => { setOpps(list); LS.set(KEYS.OPPS, list); };
+  const saveRestaurants = (list) => { setRestaurants(list); LS.set(KEYS.RESTAURANTS, list); };
+  const saveNames = (list) => { setSavedNames(list); LS.set(KEYS.NAMES, list); };
+  const saveItems2 = (list) => { setSavedItems(list); LS.set(KEYS.ITEMS, list); };
+
+  const openOpp = (opp) => { setCurrentOpp(opp); setScreen("opportunity"); };
+
+  const updateOpp = (updated) => {
+    const list = opps.map(o => o.id === updated.id ? updated : o);
+    saveOpps(list);
+    setCurrentOpp(updated);
+  };
+
+  if (screen === "home") return <HomeScreen now={now} opps={opps} onNew={() => setScreen("create")} onOpen={openOpp} />;
+  if (screen === "create") return (
+    <CreateScreen
+      restaurants={restaurants} savedNames={savedNames}
+      onBack={() => setScreen("home")}
+      onCreated={(opp, newR) => {
+        saveOpps([opp, ...opps]);
+        if (newR && !restaurants.includes(newR)) saveRestaurants([...restaurants, newR]);
+        openOpp(opp);
+      }}
+    />
+  );
+  if (screen === "opportunity" && currentOpp) return (
+    <OppScreen
+      opp={currentOpp} savedNames={savedNames} savedItems={savedItems}
+      onBack={() => setScreen("home")}
+      onUpdate={updateOpp}
+      onInvoice={() => setScreen("invoice")}
+      saveNames={saveNames} saveItems={saveItems2}
+    />
+  );
+  if (screen === "invoice" && currentOpp) return (
+    <InvoiceScreen opp={currentOpp} onBack={() => setScreen("opportunity")} onUpdate={updateOpp} />
+  );
+  return null;
+}
+
+// ── Home ──────────────────────────────────────────────────────────────────────
+function HomeScreen({ now, opps, onNew, onOpen }) {
+  const active = opps.filter(o => !o.closed);
+  const closed = opps.filter(o => o.closed);
+  return (
+    <div className="screen">
+      <div style={{background:C.DARK,padding:"28px 20px 24px",display:"flex",alignItems:"center",gap:14}}>
+        <div style={{width:44,height:44,background:C.CLAY,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff",flexShrink:0}}>س</div>
+        <h1 style={{fontSize:26,fontWeight:700,color:"#fff",margin:0,letterSpacing:"-0.5px"}}>سَهالات</h1>
+        <div style={{marginRight:"auto",textAlign:"left"}}>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.55)",marginBottom:2}}>{fmtDate(now)}</div>
+          <div style={{fontSize:17,fontWeight:600,color:C.CLAY}}>{fmtTime(now)}</div>
+        </div>
+      </div>
+
+      <button className="btn-create" onClick={onNew} style={{display:"flex",alignItems:"center",gap:8,background:C.CLAY,color:"#fff",border:"none",borderRadius:14,padding:"14px 20px",fontSize:15,fontWeight:600,width:"calc(100% - 32px)",margin:"16px 16px 0",cursor:"pointer",justifyContent:"center",boxShadow:"0 4px 14px rgba(196,149,106,0.4)",transition:"transform 0.1s"}}>
+        {IC.plus}<span>فرصة طلب جديدة</span>
+      </button>
+
+      {opps.length === 0 && (
+        <div style={{textAlign:"center",padding:"48px 20px"}}>
+          <div style={{fontSize:40,marginBottom:12}}>🍽️</div>
+          <p style={{fontSize:15,color:C.ACCENT,margin:0,fontWeight:600}}>لا توجد فرص طلب حتى الآن</p>
+          <p style={{fontSize:13,color:"#aaa",marginTop:6}}>أنشئ فرصة وشاركها مع المجلس</p>
+        </div>
+      )}
+
+      {active.length > 0 && (
+        <div style={{padding:"16px 16px 0"}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:C.ACCENT,textTransform:"uppercase",marginBottom:10}}>مفتوحة</div>
+          {active.map(o => <OppCard key={o.id} opp={o} onClick={() => onOpen(o)} />)}
+        </div>
+      )}
+      {closed.length > 0 && (
+        <div style={{padding:"16px 16px 0"}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:C.ACCENT,textTransform:"uppercase",marginBottom:10,opacity:0.5}}>مغلقة</div>
+          {closed.map(o => <OppCard key={o.id} opp={o} onClick={() => onOpen(o)} closed />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OppCard({ opp, onClick, closed }) {
+  const people = opp.orders.length;
+  const items = opp.orders.reduce((s,o) => s + o.items.length, 0);
+  return (
+    <div className="opp-card" onClick={onClick} style={{background:C.CARD,border:`1px solid ${C.BORDER}`,borderRadius:16,padding:"14px 16px",marginBottom:10,cursor:"pointer",transition:"transform 0.1s, box-shadow 0.1s",boxShadow:"0 2px 8px rgba(28,20,16,0.06)",opacity:closed?0.6:1}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,fontWeight:700,fontSize:15}}>{IC.rest}<span>{opp.restaurant}</span></div>
+        {closed && <span style={{background:"#eee",color:"#888",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20}}>مغلقة</span>}
+      </div>
+      <div style={{display:"flex",gap:14,marginBottom:6}}>
+        <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:C.ACCENT}}>{IC.user}<span>{people} شخص</span></span>
+        <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:C.ACCENT}}>{IC.rcpt}<span>{items} مادة</span></span>
+        <span style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:C.ACCENT}}>{IC.clock}<span>{opp.suggestedTime}</span></span>
+      </div>
+      <div style={{fontSize:11,color:"#999"}}>بواسطة {opp.creator}</div>
+    </div>
+  );
+}
+
+// ── Create ────────────────────────────────────────────────────────────────────
+function CreateScreen({ restaurants, savedNames, onBack, onCreated }) {
+  const [creator, setCreator] = useState("");
+  const [restaurant, setRestaurant] = useState("");
+  const [customR, setCustomR] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [time, setTime] = useState(() => {
+    const d = new Date(); d.setMinutes(d.getMinutes() + 30);
+    return d.toTimeString().slice(0,5);
+  });
+
+  const usingCustom = showNew || restaurants.length === 0;
+  const isValid = creator.trim() && (usingCustom ? customR.trim() : restaurant) && time;
+
+  const submit = () => {
+    if (!isValid) return;
+    const finalR = usingCustom ? customR : restaurant;
+    onCreated({ id:genId(), creator:creator.trim(), restaurant:finalR.trim(), suggestedTime:time, createdAt:Date.now(), orders:[], closed:false, paymentMethod:"equal" }, usingCustom ? finalR.trim() : null);
+  };
+
+  return (
+    <div className="screen">
+      <TopBar onBack={onBack} title="فرصة طلب جديدة" />
+      <div style={{padding:"20px 16px"}}>
+        <Field label="اسمك">
+          <input style={inputStyle} placeholder="اكتب اسمك" value={creator} onChange={e=>setCreator(e.target.value)} list="names-dl" />
+          <datalist id="names-dl">{savedNames.map(n=><option key={n} value={n}/>)}</datalist>
+        </Field>
+
+        <Field label="المطعم">
+          {restaurants.length > 0 && !showNew && (
+            <select style={inputStyle} value={restaurant} onChange={e=>setRestaurant(e.target.value)}>
+              <option value="">اختر مطعمًا</option>
+              {restaurants.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          {usingCustom && (
+            <input style={inputStyle} placeholder="اسم المطعم" value={customR} onChange={e=>setCustomR(e.target.value)} />
+          )}
+          {restaurants.length > 0 && (
+            <button style={{background:"none",border:"none",color:C.CLAY,fontSize:13,cursor:"pointer",padding:"4px 0",fontWeight:600,fontFamily:"inherit",marginTop:4}} onClick={()=>{setShowNew(!showNew);setRestaurant("");setCustomR("");}}>
+              {showNew ? "اختر من المحفوظة" : "+ أضف مطعم جديد"}
+            </button>
+          )}
+        </Field>
+
+        <Field label="الوقت المقترح للطلب">
+          <input style={inputStyle} type="time" value={time} onChange={e=>setTime(e.target.value)} />
+        </Field>
+
+        <button className={isValid?"btn-submit":""} onClick={submit} disabled={!isValid}
+          style={{width:"100%",padding:"14px",background:isValid?C.DARK:"#ccc",color:"#fff",border:"none",borderRadius:14,fontSize:15,fontWeight:700,cursor:isValid?"pointer":"not-allowed",marginTop:8,boxShadow:isValid?"0 4px 12px rgba(28,20,16,0.2)":"none",fontFamily:"inherit",transition:"background 0.2s"}}>
+          إنشاء الفرصة
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Opportunity ───────────────────────────────────────────────────────────────
+function OppScreen({ opp, savedNames, savedItems, onBack, onUpdate, onInvoice, saveNames, saveItems }) {
+  const [tab, setTab] = useState("summary");
+  const [userName, setUserName] = useState("");
+  const [items, setItems] = useState([{ id:genId(), name:"", customization:"" }]);
+
+  const summary = {};
+  opp.orders.forEach(o => o.items.forEach(i => { summary[i.name] = (summary[i.name]||0)+1; }));
+
+  const waText = encodeURIComponent(`🍽️ فرصة طلب من ${opp.restaurant}\n⏰ الوقت المقترح: ${opp.suggestedTime}\n👤 المنشئ: ${opp.creator}\n\nأضف طلبك الآن!`);
+
+  const addOrder = () => {
+    if (!userName.trim() || items.every(i=>!i.name.trim())) return;
+    const valid = items.filter(i=>i.name.trim());
+    const updated = { ...opp, orders: [...opp.orders, { id:genId(), person:userName.trim(), items:valid }] };
+    onUpdate(updated);
+    if (!savedNames.includes(userName.trim())) saveNames([...savedNames, userName.trim()]);
+    const newItems = valid.map(i=>i.name.trim()).filter(n=>!savedItems.includes(n));
+    if (newItems.length) saveItems([...savedItems, ...newItems]);
+    setUserName(""); setItems([{id:genId(),name:"",customization:""}]); setTab("summary");
+  };
+
+  const removeOrder = (id) => onUpdate({ ...opp, orders: opp.orders.filter(o=>o.id!==id) });
+
+  return (
+    <div className="screen">
+      <div style={{background:C.DARK,padding:"16px",display:"flex",alignItems:"center",gap:12}}>
+        <button style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:10,padding:8,cursor:"pointer",color:"#fff",display:"flex"}} onClick={onBack}>{IC.back}</button>
+        <div>
+          <h2 style={{fontSize:18,fontWeight:700,color:"#fff",margin:0}}>{opp.restaurant}</h2>
+          <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:2}}>⏰ {opp.suggestedTime} · بواسطة {opp.creator}</div>
+        </div>
+        {opp.closed && <span style={{marginRight:"auto",background:"#333",color:"#aaa",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:20}}>مغلقة</span>}
+      </div>
+
+      <div style={{display:"flex",gap:10,padding:"14px 16px 0"}}>
+        <a href={`https://wa.me/?text=${waText}`} target="_blank" rel="noopener noreferrer"
+          style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:C.WA,color:"#fff",textDecoration:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,boxShadow:"0 3px 10px rgba(37,211,102,0.3)"}}>
+          {IC.share}<span>مشاركة واتساب</span>
+        </a>
+        {opp.orders.length > 0 && (
+          <button onClick={onInvoice} style={{display:"flex",alignItems:"center",gap:6,background:C.CARD,color:C.DARK,border:`1.5px solid ${C.BORDER}`,borderRadius:12,padding:"11px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            {IC.rcpt}<span>الفاتورة</span>
+          </button>
+        )}
+      </div>
+
+      <div style={{display:"flex",padding:"14px 16px 0",borderBottom:`1px solid ${C.BORDER}`}}>
+        {["summary","add"].map(t => (
+          (!opp.closed || t==="summary") ? (
+            <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:"10px",background:"none",border:"none",borderBottom:`2px solid ${tab===t?C.CLAY:"transparent"}`,fontSize:13,fontWeight:600,color:tab===t?C.DARK:"#aaa",cursor:"pointer",fontFamily:"inherit",transition:"color 0.15s"}}>
+              {t==="summary"?"ملخص الطلبات":"+ أضف طلبك"}
+            </button>
+          ) : null
+        ))}
+      </div>
+
+      {tab==="summary" && (
+        <div>
+          {Object.keys(summary).length > 0 && (
+            <div style={{background:C.DARK,borderRadius:16,margin:"16px 16px 0",padding:"16px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.CLAY,marginBottom:10}}>إجمالي المواد</div>
+              {Object.entries(summary).map(([name,count]) => (
+                <div key={name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                  <span style={{fontSize:14,color:"#fff"}}>{name}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:C.CLAY}}>× {count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {opp.orders.length === 0 && <div style={{textAlign:"center",padding:"32px 20px"}}><p style={{color:C.ACCENT,fontWeight:600}}>لا يوجد طلبات حتى الآن</p></div>}
+
+          {opp.orders.map(order => (
+            <div key={order.id} style={{background:C.CARD,border:`1px solid ${C.BORDER}`,borderRadius:14,margin:"12px 16px 0",padding:"12px 14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{display:"flex",alignItems:"center",gap:6,fontSize:14,fontWeight:700}}>{IC.user} {order.person}</span>
+                {!opp.closed && <button style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",borderRadius:6}} onClick={()=>removeOrder(order.id)}>{IC.trash}</button>}
+              </div>
+              {order.items.map(item => (
+                <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:13,color:"#555"}}>
+                  <span style={{fontWeight:500}}>{item.name}</span>
+                  {item.customization && <span style={{color:"#999",fontSize:12}}>({item.customization})</span>}
+                  {item.price && <span style={{marginRight:"auto",color:C.GREEN,fontWeight:700,fontSize:12}}>{item.price} ر.س</span>}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {!opp.closed && opp.orders.length > 0 && (
+            <button onClick={()=>onUpdate({...opp,closed:true})} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"none",border:`1.5px solid ${C.BORDER}`,borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#888",cursor:"pointer",fontFamily:"inherit",width:"calc(100% - 32px)",margin:"16px 16px 0"}}>
+              {IC.lock} إقفال الفرصة
+            </button>
+          )}
+        </div>
+      )}
+
+      {tab==="add" && !opp.closed && (
+        <div style={{padding:"20px 16px"}}>
+          <Field label="اسمك">
+            <input style={inputStyle} placeholder="اكتب اسمك" value={userName} onChange={e=>setUserName(e.target.value)} list="add-names-dl" />
+            <datalist id="add-names-dl">{savedNames.map(n=><option key={n} value={n}/>)}</datalist>
+          </Field>
+          <div style={{fontSize:13,fontWeight:600,color:C.ACCENT,marginBottom:8}}>مواد الطلب</div>
+          {items.map((item,idx) => (
+            <div key={item.id} style={{marginBottom:10}}>
+              <div style={{display:"flex",gap:8,marginBottom:4}}>
+                <input style={{...inputStyle,flex:1}} placeholder={`مادة ${idx+1} — مثل: همبرغر`} value={item.name} list="items-dl"
+                  onChange={e=>{const cp=[...items];cp[idx].name=e.target.value;setItems(cp);}} />
+                <input style={{...inputStyle,flex:1}} placeholder="تخصيص — مثل: بدون شطة" value={item.customization}
+                  onChange={e=>{const cp=[...items];cp[idx].customization=e.target.value;setItems(cp);}} />
+                {items.length>1 && <button style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",flexShrink:0}} onClick={()=>setItems(items.filter((_,i)=>i!==idx))}>{IC.trash}</button>}
+              </div>
+              <datalist id="items-dl">{savedItems.map(n=><option key={n} value={n}/>)}</datalist>
+            </div>
+          ))}
+          <button onClick={()=>setItems([...items,{id:genId(),name:"",customization:""}])} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:`1.5px dashed ${C.BORDER}`,borderRadius:12,padding:"10px 16px",fontSize:13,fontWeight:600,color:C.CLAY,cursor:"pointer",fontFamily:"inherit",width:"100%",justifyContent:"center",marginBottom:12}}>
+            {IC.plus} أضف مادة
+          </button>
+          <button className="btn-submit" onClick={addOrder} disabled={!userName.trim()||items.every(i=>!i.name.trim())}
+            style={{width:"100%",padding:"14px",background:(!userName.trim()||items.every(i=>!i.name.trim()))?"#ccc":C.DARK,color:"#fff",border:"none",borderRadius:14,fontSize:15,fontWeight:700,cursor:(!userName.trim()||items.every(i=>!i.name.trim()))?"not-allowed":"pointer",marginTop:8,fontFamily:"inherit"}}>
+            حفظ الطلب
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Invoice ───────────────────────────────────────────────────────────────────
+function InvoiceScreen({ opp, onBack, onUpdate }) {
+  const [method, setMethod] = useState(opp.paymentMethod||"equal");
+  const [prices, setPrices] = useState(() => {
+    const m={};
+    opp.orders.forEach(o=>o.items.forEach(i=>{ if(!m[i.name]) m[i.name]=i.price||""; }));
+    return m;
+  });
+
+  const allNames = [...new Set(opp.orders.flatMap(o=>o.items.map(i=>i.name)))];
+  const getTotal = (order) => order.items.reduce((s,i)=>s+(parseFloat(prices[i.name]||0)),0);
+  const grand = opp.orders.reduce((s,o)=>s+getTotal(o),0);
+  const share = opp.orders.length>0 ? grand/opp.orders.length : 0;
+
+  const save = () => {
+    const updated = { ...opp, paymentMethod:method, orders: opp.orders.map(o=>({...o,items:o.items.map(i=>({...i,price:prices[i.name]||""}))}))} ;
+    onUpdate(updated);
+  };
+
+  return (
+    <div className="screen">
+      <TopBar onBack={onBack} title={`الفاتورة — ${opp.restaurant}`} />
+      <div style={{padding:"16px 16px 0",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <span style={{fontSize:13,fontWeight:600,color:C.ACCENT}}>طريقة القطة:</span>
+        <div style={{display:"flex",gap:8}}>
+          {[["equal","بالتساوي"],["individual","كل حسب طلبه"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setMethod(v)} style={{display:"flex",alignItems:"center",gap:4,background:method===v?C.DARK:C.CARD,color:method===v?"#fff":"#888",border:`1.5px solid ${method===v?C.DARK:C.BORDER}`,borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+              {method===v&&IC.check} {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {allNames.length>0 && (
+        <div style={{padding:"16px 16px 0"}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:C.ACCENT,marginBottom:10}}>أسعار المواد (اختياري)</div>
+          {allNames.map(name=>(
+            <div key={name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.BORDER}`}}>
+              <span style={{flex:1,fontSize:14,fontWeight:500}}>{name}</span>
+              <input type="number" style={{width:70,padding:"7px 10px",borderRadius:8,border:`1.5px solid ${C.BORDER}`,background:C.CARD,fontSize:13,textAlign:"center",fontFamily:"inherit",color:C.DARK}} placeholder="السعر" value={prices[name]||""} onChange={e=>setPrices({...prices,[name]:e.target.value})} />
+              <span style={{fontSize:12,color:"#888"}}>ر.س</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{padding:"0 16px"}}>
+        <button className="btn-submit" onClick={save} style={{width:"100%",padding:"14px",background:C.DARK,color:"#fff",border:"none",borderRadius:14,fontSize:15,fontWeight:700,cursor:"pointer",marginTop:16,fontFamily:"inherit"}}>
+          حفظ الأسعار
+        </button>
+      </div>
+
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:C.ACCENT,padding:"20px 16px 8px"}}>تفصيل الأشخاص</div>
+      {opp.orders.map(order=>{
+        const total=getTotal(order);
+        const due=method==="equal"?share:total;
+        return (
+          <div key={order.id} style={{background:C.CARD,border:`1px solid ${C.BORDER}`,borderRadius:14,margin:"0 16px 10px",padding:"12px 14px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <span style={{display:"flex",alignItems:"center",gap:6,fontSize:14,fontWeight:700}}>{IC.user} {order.person}</span>
+              {due>0 && <span style={{fontSize:15,fontWeight:700,color:C.GREEN}}>{due.toFixed(2)} ر.س</span>}
+            </div>
+            {order.items.map(item=>(
+              <div key={item.id} style={{display:"flex",alignItems:"center",fontSize:13,color:"#555",padding:"3px 0"}}>
+                <span>{item.name}</span>
+                {item.customization&&<span style={{color:"#999",fontSize:12}}> ({item.customization})</span>}
+                {prices[item.name]&&<span style={{marginRight:"auto",color:C.GREEN,fontWeight:700,fontSize:12}}>{prices[item.name]} ر.س</span>}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {grand>0&&<div style={{textAlign:"center",padding:"20px",fontSize:16,color:C.DARK,borderTop:`1px solid ${C.BORDER}`,marginTop:8}}>الإجمالي: <strong>{grand.toFixed(2)} ر.س</strong></div>}
+    </div>
+  );
+}
+
+// ── Shared ────────────────────────────────────────────────────────────────────
+function TopBar({ onBack, title, subtitle }) {
+  return (
+    <div style={{background:C.DARK,padding:"16px",display:"flex",alignItems:"center",gap:12}}>
+      <button style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:10,padding:8,cursor:"pointer",color:"#fff",display:"flex"}} onClick={onBack}>{IC.back}</button>
+      <div>
+        <h2 style={{fontSize:18,fontWeight:700,color:"#fff",margin:0}}>{title}</h2>
+        {subtitle&&<div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:2}}>{subtitle}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return <div style={{marginBottom:18}}><div style={{fontSize:13,fontWeight:600,color:C.ACCENT,marginBottom:6}}>{label}</div>{children}</div>;
+}
+
+const inputStyle = {
+  width:"100%", padding:"11px 14px", borderRadius:12, border:`1.5px solid #E8DCC8`,
+  background:"#FDFAF4", fontSize:14, color:"#1C1410", outline:"none",
+  boxSizing:"border-box", fontFamily:"'IBM Plex Sans Arabic',Tahoma,sans-serif",
+  direction:"rtl", transition:"border-color 0.15s",
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
