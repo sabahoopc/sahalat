@@ -28,8 +28,8 @@ a{text-decoration:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
 .modal{background:#FDFAF4;border-radius:20px;padding:24px;width:100%;max-width:340px}
-.qty-btn{width:30px;height:30px;border-radius:8px;border:1.5px solid #E8DCC8;background:#FDFAF4;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#1C1410}
-.qty-btn:active{background:#E8DCC8}
+.live-dot{width:7px;height:7px;background:#25D366;border-radius:50%;display:inline-block;animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.7)}}
 .tab-btn{flex:1;padding:10px;background:none;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:color 0.15s}
 </style>
 </head>
@@ -70,6 +70,35 @@ const KEYS={RESTS:"s_rests",NAMES:"s_names",REST_ITEMS:"s_rest_items",MY_IDS:"s_
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const uid=()=>Math.random().toString(36).slice(2,10);
+
+// ── Fuzzy matching ────────────────────────────────────────────────────────
+// Levenshtein distance
+function levDist(a,b){
+  a=a.trim().toLowerCase();b=b.trim().toLowerCase();
+  if(a===b) return 0;
+  if(!a.length) return b.length;
+  if(!b.length) return a.length;
+  const dp=Array.from({length:a.length+1},(_,i)=>Array.from({length:b.length+1},(_,j)=>i===0?j:j===0?i:0));
+  for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++)
+    dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  return dp[a.length][b.length];
+}
+// Returns similarity 0-1
+function similarity(a,b){
+  if(!a||!b) return 0;
+  const maxLen=Math.max(a.length,b.length);
+  return maxLen===0?1:(1-levDist(a,b)/maxLen);
+}
+// Find best match in list above threshold
+function findFuzzyMatch(input,candidates,threshold=0.65){
+  if(!input||input.length<2) return null;
+  let best=null,bestScore=0;
+  candidates.forEach(c=>{
+    const s=similarity(input,c);
+    if(s>bestScore&&s>=threshold&&c.toLowerCase()!==input.toLowerCase()){bestScore=s;best=c;}
+  });
+  return best?{match:best,score:bestScore}:null;
+}
 const fmtTime=d=>new Date(d).toLocaleTimeString("ar-SA",{hour:"2-digit",minute:"2-digit"});
 const fmtDate=d=>new Date(d).toLocaleDateString("ar-SA",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
 const getUrlId=()=>new URLSearchParams(window.location.search).get("opp");
@@ -210,6 +239,31 @@ function QtyControl({value,onChange}){
   );
 }
 
+// ── Item input with fuzzy suggestion ─────────────────────────────────────
+function ItemInput({value,onChange,suggestions,placeholder}){
+  const fuzzy=React.useMemo(()=>findFuzzyMatch(value,suggestions),[value,suggestions]);
+  return(
+    <div style={{flex:1,position:"relative"}}>
+      <input style={{...inp,padding:"9px 12px",width:"100%",boxSizing:"border-box"}}
+        placeholder={placeholder} value={value}
+        onChange={e=>onChange(e.target.value)}
+        list="dl-global-items"
+        autoComplete="off"
+      />
+      <datalist id="dl-global-items">{suggestions.map(n=><option key={n} value={n}/>)}</datalist>
+      {fuzzy&&value.length>=2&&(
+        <div style={{position:"absolute",top:"calc(100% + 2px)",right:0,left:0,background:DARK,borderRadius:10,padding:"8px 12px",zIndex:20,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,boxShadow:"0 4px 16px rgba(0,0,0,0.2)"}}>
+          <span style={{fontSize:12,color:"rgba(255,255,255,0.55)",flexShrink:0}}>هل تقصد؟</span>
+          <button onClick={()=>onChange(fuzzy.match)}
+            style={{background:CLAY,color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+            {fuzzy.match} ✓
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────
 function App(){
   const [screen,setScreen]=useState("loading");
@@ -221,15 +275,51 @@ function App(){
   const [toast,setToast]  =useState(null);
   const toastRef          =useRef(null);
 
+  // Keep a ref to current opp id so the realtime callback can read it
+  const oppIdRef=useRef(null);
+  const screenRef=useRef("loading");
+
   useEffect(()=>{
     const init=async()=>{
       const id=getUrlId();
-      if(id){const data=await dbGet(id);if(data){setOpp(data);setScreen(data.type==="cook"?"cook":"opp");}else setScreen("home");}
-      else{const ids=LS.get(KEYS.MY_IDS)||[];const list=await dbList(ids);setMyOpps(list);setScreen("home");}
+      if(id){
+        const data=await dbGet(id);
+        if(data){
+          setOpp(data);
+          oppIdRef.current=id;
+          const sc=data.type==="cook"?"cook":"opp";
+          screenRef.current=sc;
+          setScreen(sc);
+        } else setScreen("home");
+      } else {
+        const ids=LS.get(KEYS.MY_IDS)||[];
+        const list=await dbList(ids);
+        setMyOpps(list);
+        setScreen("home");
+      }
     };
     init();
+
+    // Realtime subscription — fires whenever any row in opportunities changes
+    const channel=sb.channel("opp-changes")
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"opportunities"},(payload)=>{
+        const updated=payload.new&&payload.new.data;
+        if(!updated) return;
+        // Update current open opp if it matches
+        if(oppIdRef.current&&updated.id===oppIdRef.current){
+          setOpp(updated);
+        }
+        // Update myOpps list if this opp is in it
+        setMyOpps(prev=>{
+          const idx=prev.findIndex(o=>o.id===updated.id);
+          if(idx===-1) return prev;
+          const copy=[...prev];copy[idx]=updated;return copy;
+        });
+      })
+      .subscribe();
+
     const t=setInterval(()=>setNow(new Date()),30000);
-    return()=>clearInterval(t);
+    return()=>{clearInterval(t);sb.removeChannel(channel);};
   },[]);
 
   const showToast=msg=>{setToast(msg);clearTimeout(toastRef.current);toastRef.current=setTimeout(()=>setToast(null),2500);};
@@ -247,8 +337,12 @@ function App(){
     setScreen(newOpp.type==="cook"?"cook":"opp");
   };
 
-  const updateOpp=async updated=>{setOpp(updated);await dbUpdate(updated);};
-  const goHome=()=>{clearUrl();setOpp(null);const ids=LS.get(KEYS.MY_IDS)||[];dbList(ids).then(l=>setMyOpps(l));setScreen("home");};
+  const updateOpp=async updated=>{
+    setOpp(updated);
+    oppIdRef.current=updated.id;
+    await dbUpdate(updated);
+  };
+  const goHome=()=>{clearUrl();setOpp(null);oppIdRef.current=null;const ids=LS.get(KEYS.MY_IDS)||[];dbList(ids).then(l=>setMyOpps(l));setScreen("home");};
 
   const stats=calcWeekStats(myOpps);
 
@@ -475,7 +569,10 @@ function CookScreen({opp,names,onBack,onUpdate,saveNames,showToast}){
       )}
 
       <TopBar onBack={onBack} title={opp.mealName} sub={"⏰ "+opp.suggestedTime+" · الطباخ: "+opp.creator}
-        right={opp.closed?<span style={{background:"#333",color:"#aaa",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap",flexShrink:0}}>مغلقة</span>:null}/>
+        right={opp.closed
+          ?<span style={{background:"#333",color:"#aaa",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap",flexShrink:0}}>مغلقة</span>
+          :<span style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}><span className="live-dot"/><span style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>مباشر</span></span>
+        }/>
 
       <div style={{padding:"14px 16px 0",display:"flex",gap:8}}>
         <button onClick={shareWA} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:WA,color:"#fff",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 3px 10px rgba(37,211,102,0.3)"}}>
@@ -583,7 +680,10 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
     <div className="screen">
       {pinModal&&<PinModal onConfirm={confirmPin} onCancel={()=>setPinModal(false)} error={pinError||null}/>}
       <TopBar onBack={onBack} title={opp.restaurant} sub={"⏰ "+opp.suggestedTime+" · بواسطة "+opp.creator}
-        right={opp.closed?<span style={{background:"#333",color:"#aaa",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap",flexShrink:0}}>مغلقة</span>:null}/>
+        right={opp.closed
+          ?<span style={{background:"#333",color:"#aaa",fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap",flexShrink:0}}>مغلقة</span>
+          :<span style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}><span className="live-dot"/><span style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>مباشر</span></span>
+        }/>
 
       <div style={{display:"flex",gap:8,padding:"14px 16px 0"}}>
         <button onClick={shareWA} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:WA,color:"#fff",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 3px 10px rgba(37,211,102,0.3)"}}>
@@ -649,8 +749,12 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
           {items.map((item,idx)=>(
             <div key={item.id} style={{background:CARD,border:"1px solid "+BORDER,borderRadius:12,padding:"10px 12px",marginBottom:10}}>
               <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-                <input style={{...inp,flex:1,padding:"9px 12px"}} placeholder={"مادة "+(idx+1)} value={item.name} list={"dl-si-"+idx} onChange={e=>setItem(idx,"name",e.target.value)}/>
-                <datalist id={"dl-si-"+idx}>{suggestions.map(n=><option key={n} value={n}/>)}</datalist>
+                <ItemInput
+                  value={item.name}
+                  onChange={v=>setItem(idx,"name",v)}
+                  suggestions={suggestions}
+                  placeholder={"مادة "+(idx+1)}
+                />
                 {items.length>1&&<button onClick={()=>setItems(items.filter((_,i)=>i!==idx))} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex",flexShrink:0}}>{Ico.trash}</button>}
               </div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
