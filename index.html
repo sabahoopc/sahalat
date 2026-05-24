@@ -531,7 +531,9 @@ function CookScreen({opp,names,onBack,onUpdate,saveNames,showToast}){
     if(!uname.trim()||alreadyIn||regClosed) return;
     setSaving(true);
     try{
-      const updated={...opp,participants:[...participants,uname.trim()]};
+      // Fetch latest to avoid overwriting concurrent joins
+      const latest=await dbGet(opp.id)||opp;
+      const updated={...latest,participants:[...(latest.participants||[]),uname.trim()]};
       await onUpdate(updated);
       if(!names.includes(uname.trim())) saveNames([...names,uname.trim()]);
       setUname("");showToast("تم تسجيل اسمك ✓");
@@ -660,9 +662,12 @@ function OppScreen({opp,names,onBack,onUpdate,onInvoice,saveNames,showToast}){
     setSaving(true);
     const valid=items.filter(i=>i.name.trim()).map(i=>({id:i.id,name:i.name.trim(),customization:i.custom.trim(),qty:i.qty||1,price:""}));
     try{
-      await onUpdate({...opp,orders:[...(opp.orders||[]),{id:uid(),person:uname.trim(),items:valid}]});
+      // Fetch latest before saving to avoid race condition overwriting others' orders
+      const latest=await dbGet(opp.id)||opp;
+      const updated={...latest,orders:[...(latest.orders||[]),{id:uid(),person:uname.trim(),items:valid}]};
+      await onUpdate(updated);
       if(!names.includes(uname.trim())) saveNames([...names,uname.trim()]);
-      valid.forEach(i=>saveRestItem(opp.restaurant,i.name));
+      valid.forEach(i=>saveRestItem(latest.restaurant,i.name));
       setUname("");setItems([{id:uid(),name:"",custom:"",qty:1}]);
       setTab("summary");showToast("تم إضافة طلبك ✓");
     }catch(e){showToast("حدث خطأ");}
