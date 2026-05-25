@@ -64,9 +64,8 @@ async function dbList(ids){if(!ids||!ids.length)return[];const {data,error}=awai
 // data = { id, restaurant, items:[{id,name,price,category}] }
 async function menuGetAll(){const {data,error}=await sb.from("menus").select("data");if(error||!data)return[];return data.map(r=>r.data);}
 async function menuSave(menu){
-  const {data}=await sb.from("menus").select("id").eq("id",menu.id).single();
-  if(data) await sb.from("menus").update({data:menu}).eq("id",menu.id);
-  else await sb.from("menus").insert({id:menu.id,data:menu});
+  const {error}=await sb.from("menus").upsert({id:menu.id,data:menu},{onConflict:"id"});
+  if(error) throw error;
 }
 async function menuDelete(id){await sb.from("menus").delete().eq("id",id);}
 
@@ -310,9 +309,11 @@ function MenusScreen({menus,setMenus,showToast}){
   const [editing,setEditing]=useState(null); // menu object or null for new
 
   const saveMenu=async(menu)=>{
-    await menuSave(menu);
-    setMenus(prev=>{const i=prev.findIndex(m=>m.id===menu.id);if(i===-1)return[...prev,menu];const c=[...prev];c[i]=menu;return c;});
-    showToast("تم الحفظ ✓");setView("list");
+    try{
+      await menuSave(menu);
+      setMenus(prev=>{const i=prev.findIndex(m=>m.id===menu.id);if(i===-1)return[...prev,menu];const c=[...prev];c[i]=menu;return c;});
+      showToast("تم الحفظ ✓");setView("list");
+    }catch(e){showToast("حدث خطأ في الحفظ — تأكد من الاتصال");console.error(e);}
   };
   const deleteMenu=async(id)=>{
     await menuDelete(id);setMenus(prev=>prev.filter(m=>m.id!==id));showToast("تم الحذف");
