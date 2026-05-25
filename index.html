@@ -332,7 +332,7 @@ function MenusScreen({menus,setMenus,showToast}){
           {Ico.plus}<span>إضافة يدوية</span>
         </button>
         <button onClick={()=>setView("import")} style={{flex:1,display:"flex",alignItems:"center",gap:6,background:DARK,color:"#fff",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",justifyContent:"center",fontFamily:"inherit"}}>
-          {Ico.import}<span>استيراد من رابط</span>
+          {Ico.import}<span>استيراد JSON</span>
         </button>
       </div>
       {menus.length===0&&(<div style={{textAlign:"center",padding:"48px 20px"}}><div style={{fontSize:40,marginBottom:12}}>📋</div><p style={{fontSize:14,color:ACCENT,fontWeight:600,margin:0}}>لا يوجد منيو محفوظ</p><p style={{fontSize:12,color:"#aaa",marginTop:6}}>أضف منيو مطعمك المفضل</p></div>)}
@@ -342,6 +342,7 @@ function MenusScreen({menus,setMenus,showToast}){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{display:"flex",alignItems:"center",gap:6,fontWeight:700,fontSize:15,color:DARK}}>{Ico.rest}<span>{m.restaurant}</span></div>
               <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{const blob=new Blob([JSON.stringify({restaurant:m.restaurant,items:m.items},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=m.restaurant+".json";a.click();}} style={{background:"none",border:"none",cursor:"pointer",color:"#aaa",padding:4,display:"flex",fontSize:11,alignItems:"center",gap:2}} title="تصدير JSON">⬇</button>
                 <button onClick={()=>{setEditing(m);setView("edit");}} style={{background:"none",border:"none",cursor:"pointer",color:CLAY,padding:4,display:"flex"}}>{Ico.edit}</button>
                 <button onClick={()=>deleteMenu(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#ccc",padding:4,display:"flex"}}>{Ico.trash}</button>
               </div>
@@ -432,103 +433,88 @@ function MenuEditor({menu,onSave,onBack}){
 
 // ── Menu Importer ─────────────────────────────────────────────────────────
 function MenuImporter({onSave,onBack,showToast}){
-  const [url,setUrl]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [result,setResult]=useState(null);
-  const [restName,setRestName]=useState("");
+  const [jsonText,setJsonText]=useState("");
+  const [parsed,setParsed]=useState(null);
+  const [error,setError]=useState("");
 
-  const tryImport=async()=>{
-    if(!url.trim()) return;
-    setLoading(true);setResult(null);
+  const tryParse=()=>{
+    setError("");setParsed(null);
     try{
-      // Use allorigins.win CORS proxy to fetch the page
-      const proxyUrl="https://api.allorigins.win/get?url="+encodeURIComponent(url.trim());
-      const res=await fetch(proxyUrl);
-      const json=await res.json();
-      const html=json.contents||"";
-
-      // Parse: look for common menu patterns
-      const items=[];
-      const parser=new DOMParser();
-      const doc=parser.parseFromString(html,"text/html");
-
-      // Try to get restaurant name from title or h1
-      const titleEl=doc.querySelector("h1")||doc.querySelector("title");
-      const detectedName=titleEl?titleEl.textContent.trim().split("|")[0].split("-")[0].trim():"";
-      setRestName(detectedName);
-
-      // Hungerstation / Jahez style: look for JSON-LD or common selectors
-      const scripts=doc.querySelectorAll("script[type='application/ld+json']");
-      scripts.forEach(s=>{
-        try{
-          const data=JSON.parse(s.textContent);
-          const menus=data.hasMenuSection||data.menu||[];
-          (Array.isArray(menus)?menus:[menus]).forEach(section=>{
-            const its=section.hasMenuItem||section.items||[];
-            (Array.isArray(its)?its:[its]).forEach(item=>{
-              if(item.name) items.push({id:uid(),name:item.name,price:item.offers?.price||"",category:section.name||""});
-            });
-          });
-        }catch{}
-      });
-
-      // Fallback: scrape text patterns (price next to item name)
-      if(items.length===0){
-        const els=doc.querySelectorAll("[class*='item'],[class*='product'],[class*='menu'],[class*='dish']");
-        els.forEach(el=>{
-          const text=el.textContent.trim();
-          const priceMatch=text.match(/(\d+(?:\.\d+)?)\s*(ر\.س|SAR|ريال)/i);
-          const name=text.replace(/\d+(?:\.\d+)?\s*(ر\.س|SAR|ريال)/gi,"").trim().split("\n")[0].trim();
-          if(name&&name.length>1&&name.length<60){
-            items.push({id:uid(),name,price:priceMatch?priceMatch[1]:"",category:""});
-          }
-        });
+      const data=JSON.parse(jsonText.trim());
+      // Accept both {restaurant,items} and array of items
+      let restaurant="";let items=[];
+      if(Array.isArray(data)){
+        items=data.map(i=>({id:uid(),name:i.name||i.item||"",price:i.price||i.سعر||"",category:i.category||i.تصنيف||""})).filter(i=>i.name);
+      } else {
+        restaurant=data.restaurant||data.مطعم||data.name||"";
+        const raw=data.items||data.menu||data.أصناف||[];
+        items=raw.map(i=>({id:uid(),name:i.name||i.اسم||"",price:i.price||i.سعر||"",category:i.category||i.تصنيف||""})).filter(i=>i.name);
       }
-
-      // Deduplicate by name
-      const seen=new Set();
-      const unique=items.filter(i=>{if(seen.has(i.name))return false;seen.add(i.name);return true;});
-
-      if(unique.length>0){setResult(unique);}
-      else{showToast("لم يتم العثور على أصناف — جرب الإدخال اليدوي");}
-    }catch(e){showToast("حدث خطأ في جلب الصفحة");}
-    setLoading(false);
+      if(items.length===0){setError("لم يتم العثور على أصناف في الملف");return;}
+      setParsed({id:uid(),restaurant,items});
+    }catch(e){setError("صيغة JSON غير صحيحة — تأكد من تنسيق الملف");}
   };
 
-  const saveImported=async()=>{
-    await onSave({id:uid(),restaurant:restName,items:result});
+  const loadFile=(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{setJsonText(ev.target.result);setError("");setParsed(null);};
+    reader.readAsText(file);
   };
+
+  const save=async()=>{await onSave(parsed);};
 
   return(
     <div className="screen">
-      <TopBar onBack={onBack} title="استيراد منيو"/>
+      <TopBar onBack={onBack} title="استيراد منيو JSON"/>
       <div style={{padding:"20px 16px"}}>
         <div style={{background:"#FFF8F0",border:"1px solid #F0D9BA",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
-          <div style={{fontSize:13,fontWeight:700,color:ACCENT,marginBottom:4}}>كيف يعمل الاستيراد؟</div>
-          <div style={{fontSize:12,color:"#666",lineHeight:1.7}}>
-            الصق رابط صفحة المطعم من Hungerstation أو Jahez أو أي موقع توصيل، ستحاول الأداة استخراج الأصناف تلقائياً. إذا لم ينجح، استخدم الإدخال اليدوي.
-          </div>
+          <div style={{fontSize:13,fontWeight:700,color:ACCENT,marginBottom:6}}>شكل الـ JSON المطلوب</div>
+          <pre style={{fontSize:11,color:"#666",margin:0,lineHeight:1.7,overflowX:"auto",direction:"ltr",textAlign:"left"}}>{`{
+  "restaurant": "اسم المطعم",
+  "items": [
+    {"name":"همبرغر","price":"28","category":"برغر"},
+    {"name":"بيبسي","price":"7","category":"مشروبات"}
+  ]
+}`}</pre>
         </div>
-        <Field label="رابط صفحة المطعم">
-          <input style={inp} placeholder="https://hungerstation.com/..." value={url} onChange={e=>setUrl(e.target.value)} type="url"/>
-        </Field>
-        <Btn onClick={tryImport} disabled={!url.trim()} loading={loading}>{Ico.import} جلب المنيو</Btn>
 
-        {result&&(
+        <div style={{fontSize:13,fontWeight:600,color:ACCENT,marginBottom:8}}>رفع ملف JSON</div>
+        <label style={{display:"flex",alignItems:"center",gap:8,background:CARD,border:"1.5px dashed "+BORDER,borderRadius:12,padding:"12px 16px",cursor:"pointer",marginBottom:14}}>
+          {Ico.import}
+          <span style={{fontSize:13,color:ACCENT,fontWeight:600}}>اختر ملف .json</span>
+          <input type="file" accept=".json,application/json" onChange={loadFile} style={{display:"none"}}/>
+        </label>
+
+        <div style={{fontSize:13,fontWeight:600,color:ACCENT,marginBottom:8}}>أو الصق النص مباشرة</div>
+        <textarea
+          style={{...inp,height:160,resize:"vertical",fontSize:12,fontFamily:"monospace",direction:"ltr",textAlign:"left"}}
+          placeholder={'{"restaurant":"...","items":[...]}'}
+          value={jsonText}
+          onChange={e=>{setJsonText(e.target.value);setError("");setParsed(null);}}
+        />
+        {error&&<div style={{fontSize:12,color:"#e55",marginTop:6,padding:"8px 12px",background:"#fff5f5",borderRadius:8}}>{error}</div>}
+
+        <Btn onClick={tryParse} disabled={!jsonText.trim()}>تحليل JSON</Btn>
+
+        {parsed&&(
           <div style={{marginTop:20}}>
             <Field label="اسم المطعم">
-              <input style={inp} value={restName} onChange={e=>setRestName(e.target.value)} placeholder="اسم المطعم"/>
+              <input style={inp} value={parsed.restaurant} onChange={e=>setParsed({...parsed,restaurant:e.target.value})} placeholder="اسم المطعم"/>
             </Field>
-            <div style={{fontSize:13,fontWeight:600,color:ACCENT,marginBottom:8}}>تم العثور على {result.length} صنف</div>
-            <div style={{maxHeight:260,overflowY:"auto",border:"1px solid "+BORDER,borderRadius:12,padding:"8px"}}>
-              {result.map((i,idx)=>(
-                <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",borderBottom:idx<result.length-1?"1px solid "+BORDER:"none"}}>
-                  <span style={{fontSize:13,fontWeight:500}}>{i.name}</span>
+            <div style={{fontSize:13,fontWeight:600,color:ACCENT,marginBottom:8}}>تم تحليل {parsed.items.length} صنف ✓</div>
+            <div style={{maxHeight:220,overflowY:"auto",border:"1px solid "+BORDER,borderRadius:12,marginBottom:8}}>
+              {parsed.items.map((i,idx)=>(
+                <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 14px",borderBottom:idx<parsed.items.length-1?"1px solid "+BORDER:"none"}}>
+                  <div>
+                    <span style={{fontSize:13,fontWeight:500,color:DARK}}>{i.name}</span>
+                    {i.category&&<span style={{fontSize:10,color:"#aaa",marginRight:6}}>· {i.category}</span>}
+                  </div>
                   {i.price&&<span style={{fontSize:12,color:GREEN,fontWeight:700}}>{i.price} ر.س</span>}
                 </div>
               ))}
             </div>
-            <Btn onClick={saveImported} disabled={!restName.trim()}>حفظ المنيو</Btn>
+            <Btn onClick={save} disabled={!parsed.restaurant.trim()}>حفظ المنيو</Btn>
           </div>
         )}
       </div>
