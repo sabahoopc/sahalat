@@ -328,11 +328,8 @@ function MenusScreen({menus,setMenus,showToast}){
         <h1 style={{fontSize:22,fontWeight:700,color:"#fff",margin:0}}>المنيو</h1>
       </div>
       <div style={{display:"flex",gap:10,padding:"14px 16px 0"}}>
-        <button onClick={()=>{setEditing({id:uid(),restaurant:"",items:[]});setView("edit");}} style={{flex:1,display:"flex",alignItems:"center",gap:6,background:CLAY,color:"#fff",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",justifyContent:"center",fontFamily:"inherit"}}>
-          {Ico.plus}<span>إضافة يدوية</span>
-        </button>
-        <button onClick={()=>setView("import")} style={{flex:1,display:"flex",alignItems:"center",gap:6,background:DARK,color:"#fff",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",justifyContent:"center",fontFamily:"inherit"}}>
-          {Ico.import}<span>استيراد JSON</span>
+        <button onClick={()=>setView("import")} style={{flex:1,display:"flex",alignItems:"center",gap:6,background:CLAY,color:"#fff",border:"none",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",justifyContent:"center",fontFamily:"inherit"}}>
+          {Ico.import}<span>استيراد منيو JSON</span>
         </button>
       </div>
       {menus.length===0&&(<div style={{textAlign:"center",padding:"48px 20px"}}><div style={{fontSize:40,marginBottom:12}}>📋</div><p style={{fontSize:14,color:ACCENT,fontWeight:600,margin:0}}>لا يوجد منيو محفوظ</p><p style={{fontSize:12,color:"#aaa",marginTop:6}}>أضف منيو مطعمك المفضل</p></div>)}
@@ -526,18 +523,14 @@ function MenuImporter({onSave,onBack,showToast}){
 function CreateOrderScreen({menus,names,onBack,onCreated}){
   const [creator,setCreator]=useState("");
   const [rest,setRest]      =useState("");
-  const [customR,setCustomR]=useState("");
-  const [showNew,setShowNew]=useState(false);
   const [pin,setPin]        =useState("");
   const [loading,setLoading]=useState(false);
   const [time,setTime]      =useState(()=>{const d=new Date();d.setMinutes(d.getMinutes()+30);return d.toTimeString().slice(0,5);});
   const restNames=menus.map(m=>m.restaurant);
-  const useCustom=showNew||restNames.length===0;
-  const restVal=useCustom?customR:rest;
-  const valid=creator.trim()&&restVal.trim()&&time&&pin.length>=4&&!loading;
+  const valid=creator.trim()&&rest&&time&&pin.length>=4&&!loading;
   const submit=async()=>{
     if(!valid) return;setLoading(true);
-    try{await onCreated({id:uid(),type:"order",creator:creator.trim(),restaurant:restVal.trim(),suggestedTime:time,createdAt:Date.now(),orders:[],closed:false,paymentMethod:"equal",pinHash:btoa(pin)},pin,null);}
+    try{await onCreated({id:uid(),type:"order",creator:creator.trim(),restaurant:rest,suggestedTime:time,createdAt:Date.now(),orders:[],closed:false,paymentMethod:"equal",pinHash:btoa(pin)},pin,null);}
     catch(e){alert("حدث خطأ أثناء الحفظ");}
     setLoading(false);
   };
@@ -545,11 +538,21 @@ function CreateOrderScreen({menus,names,onBack,onCreated}){
     <div className="screen">
       <TopBar onBack={onBack} title="فرصة طلب جديدة"/>
       <div style={{padding:"20px 16px"}}>
+        {restNames.length===0&&(
+          <div style={{background:"#FFF8F0",border:"1px solid #F0D9BA",borderRadius:12,padding:"12px 14px",marginBottom:16,display:"flex",gap:10,alignItems:"center"}}>
+            {Ico.menu}
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:ACCENT}}>لا يوجد مطاعم محفوظة</div>
+              <div style={{fontSize:12,color:"#888",marginTop:2}}>أضف منيو مطعم أولاً من تبويب المنيو</div>
+            </div>
+          </div>
+        )}
         <Field label="اسمك"><input style={inp} placeholder="اكتب اسمك" value={creator} onChange={e=>setCreator(e.target.value)} list="dl-cn"/><datalist id="dl-cn">{names.map(n=><option key={n} value={n}/>)}</datalist></Field>
         <Field label="المطعم">
-          {restNames.length>0&&!showNew&&(<select style={{...inp,marginBottom:6}} value={rest} onChange={e=>setRest(e.target.value)}><option value="">اختر مطعمًا</option>{restNames.map(r=><option key={r} value={r}>{r}</option>)}</select>)}
-          {useCustom&&<input style={inp} placeholder="اسم المطعم" value={customR} onChange={e=>setCustomR(e.target.value)}/>}
-          {restNames.length>0&&(<button onClick={()=>{setShowNew(!showNew);setRest("");setCustomR("");}} style={{background:"none",border:"none",color:CLAY,fontSize:13,cursor:"pointer",padding:"4px 0",fontWeight:600,fontFamily:"inherit",marginTop:6,display:"block"}}>{showNew?"← اختر من المحفوظة":"+ أضف مطعم غير موجود"}</button>)}
+          <select style={inp} value={rest} onChange={e=>setRest(e.target.value)} disabled={restNames.length===0}>
+            <option value="">اختر مطعمًا</option>
+            {restNames.map(r=><option key={r} value={r}>{r}</option>)}
+          </select>
         </Field>
         <Field label="الوقت المقترح"><input style={inp} type="time" value={time} onChange={e=>setTime(e.target.value)}/></Field>
         <Field label="رمز الإقفال (4 أرقام على الأقل)" hint="يمكّنك فقط من إقفال الفرصة لاحقاً">
